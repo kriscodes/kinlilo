@@ -84,7 +84,7 @@ Detailed schema, endpoints, frontend components, privacy behavior, deployment pl
 
 ## Privacy and data ownership
 
-Sharing starts disabled. Family administration does not override a person's consent. Proposed v1 behavior: pausing hides that member's latest position and history from peers while retaining their own history. Removal, device revocation, and deletion invalidate outstanding upload sessions. New members cannot see history from before they joined.
+Sharing starts disabled. Family administration does not override a person's consent. Proposed v1 behavior: pausing hides that member's latest position and history from peers after server confirmation, while retaining their own history. Offline pause stops local collection immediately and shows the remote change as pending. Resume shares permitted retained history again, but current position waits for a fresh sample. Removal, device revocation, and deletion invalidate outstanding upload sessions. New members cannot see history from before they joined.
 
 Location data uses TLS in transit and protected storage; the proposed server can read it, so this is not end-to-end encryption. Exact coordinates and tokens must stay out of logs and analytics. Retention, backup expiry, and deletion behavior must be tested before a family pilot.
 
