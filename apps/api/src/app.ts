@@ -6,6 +6,7 @@ import { createAuth } from "./auth";
 import { createCirclesRouter, RequestError } from "./circles";
 import type { Config } from "./config";
 import { connectDatabase } from "./db";
+import { createLocationsRouter } from "./locations";
 import { createSharingRouter } from "./sharing";
 
 export function createApp(config: Config) {
@@ -43,6 +44,7 @@ export function createApp(config: Config) {
     next();
   });
 
+  app.post("/v1/location-batches", express.json({ limit: "32kb" }));
   app.use("/v1", express.json({ limit: "8kb" }));
   app.use("/v1", async (req, res, next) => {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
@@ -58,6 +60,7 @@ export function createApp(config: Config) {
   }));
   app.use("/v1/circles", createCirclesRouter(db));
   app.use("/v1", createSharingRouter(db));
+  app.use("/v1/location-batches", createLocationsRouter(db));
   app.use((_req, _res, next) => next(new RequestError(404, "Page not found.")));
 
   const handleError: ErrorRequestHandler = (error, _req, res, _next) => {
@@ -69,7 +72,7 @@ export function createApp(config: Config) {
       res.status(error.status).json({ error: { message: "Invalid request body." } });
       return;
     }
-    // Never log an error object that could include request headers or bound invite values.
+    // Database errors can contain bound values, including invite codes or coordinates.
     console.error("Kinlilo API request failed.", error?.code ?? error?.name ?? "unknown");
     res.status(500).json({ error: { message: "Something went wrong. Try again." } });
   };

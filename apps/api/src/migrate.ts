@@ -10,6 +10,7 @@ const connection = await pool.connect();
 const migrations = [
   { version: 1, filename: "001-circles.sql" },
   { version: 2, filename: "002-sharing.sql" },
+  { version: 3, filename: "003-location.sql" },
 ];
 
 try {

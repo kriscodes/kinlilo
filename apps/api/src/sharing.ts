@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { RequestError } from "./circles";
-import { devices, lockAccount, memberships, trackingSessions, type Database } from "./db";
+import { devices, latestLocations, lockAccount, memberships, trackingSessions, type Database } from "./db";
 
 type Locals = { userId: string };
 
@@ -90,6 +90,8 @@ export function createSharingRouter(db: Database) {
       const affectedCircles = tx.select({ id: trackingSessions.circleId }).from(trackingSessions).where(activeSessions);
       await tx.update(memberships).set({ sharingVersion: sql`gen_random_uuid()` })
         .where(and(eq(memberships.userId, userId), inArray(memberships.circleId, affectedCircles)));
+      await tx.delete(latestLocations)
+        .where(and(eq(latestLocations.userId, userId), inArray(latestLocations.circleId, affectedCircles)));
       await tx.update(trackingSessions).set({ endedAt: sessionEnd }).where(activeSessions);
       return updated;
     });
@@ -118,6 +120,7 @@ export function createSharingRouter(db: Database) {
 
       if (current.activeSession) {
         await tx.update(trackingSessions).set({ endedAt: sessionEnd }).where(eq(trackingSessions.id, current.activeSession.id));
+        await tx.delete(latestLocations).where(and(eq(latestLocations.circleId, id), eq(latestLocations.userId, userId)));
       }
       const [activeSession] = await tx.insert(trackingSessions).values({
         id: randomUUID(), circleId: id, userId, deviceId: idOfDevice, startedAt: sql`clock_timestamp()`,
@@ -143,6 +146,7 @@ export function createSharingRouter(db: Database) {
       if (target.endedAt) return current;
 
       await tx.update(trackingSessions).set({ endedAt: sessionEnd }).where(session);
+      await tx.delete(latestLocations).where(and(eq(latestLocations.circleId, id), eq(latestLocations.userId, userId)));
       const version = randomUUID();
       await tx.update(memberships).set({ sharingVersion: version }).where(memberOf(id, userId));
       return { version, activeSession: null };

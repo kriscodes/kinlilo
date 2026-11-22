@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { foreignKey, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { doublePrecision, foreignKey, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 
 export const authUsers = pgTable("user", {
@@ -48,6 +48,36 @@ export const trackingSessions = pgTable("tracking_sessions", {
 }, table => [
   foreignKey({ columns: [table.circleId, table.userId], foreignColumns: [memberships.circleId, memberships.userId] }).onDelete("cascade"),
   foreignKey({ columns: [table.userId, table.deviceId], foreignColumns: [devices.userId, devices.id] }).onDelete("cascade"),
+]);
+
+export const locationPoints = pgTable("location_points", {
+  id: uuid().primaryKey(),
+  sessionId: uuid("session_id").notNull(),
+  circleId: uuid("circle_id").notNull(),
+  userId: text("user_id").notNull(),
+  deviceId: uuid("device_id").notNull(),
+  eventId: uuid("event_id").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  latitude: doublePrecision().notNull(),
+  longitude: doublePrecision().notNull(),
+  accuracyM: doublePrecision("accuracy_m").notNull(),
+}, table => [foreignKey({
+  columns: [table.sessionId, table.circleId, table.userId, table.deviceId],
+  foreignColumns: [trackingSessions.id, trackingSessions.circleId, trackingSessions.userId, trackingSessions.deviceId],
+}).onDelete("cascade")]);
+
+export const latestLocations = pgTable("latest_locations", {
+  circleId: uuid("circle_id").notNull(),
+  userId: text("user_id").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  pointId: uuid("point_id").notNull(),
+}, table => [
+  primaryKey({ columns: [table.circleId, table.userId] }),
+  foreignKey({
+    columns: [table.circleId, table.userId, table.capturedAt, table.pointId],
+    foreignColumns: [locationPoints.circleId, locationPoints.userId, locationPoints.capturedAt, locationPoints.id],
+  }).onDelete("cascade"),
 ]);
 
 export function connectDatabase(connectionString: string) {

@@ -12,6 +12,16 @@ export const registerDevice = z.object({
   label: z.string().trim().min(1).max(60),
 }).strict();
 export const startSharing = z.object({ deviceId, version: z.uuid() }).strict();
+export const locationBatch = z.object({
+  sessionId: trackingSessionId,
+  events: z.array(z.object({
+    eventId: z.uuid(),
+    capturedAt: z.iso.datetime({ precision: 3 }),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    accuracyM: z.number().nonnegative(),
+  }).strict()).min(1).max(100),
+}).strict();
 
 export type CircleRole = "owner" | "member";
 export type Circle = {
@@ -26,6 +36,10 @@ export type CircleInvite = { code: string; expiresAt: string };
 export type Device = { id: string; label: string; registeredAt: string; revokedAt: string | null };
 export type TrackingSession = { id: string; deviceId: string; startedAt: string };
 export type CircleSharing = { version: string; activeSession: TrackingSession | null };
+export type LocationBatchEventResult =
+  | { eventId: string; status: "accepted" | "duplicate" }
+  | { eventId: string; status: "rejected"; reason: "before_session" | "future_timestamp" | "event_conflict" };
+export type LocationBatchResult = { serverTime: string; results: LocationBatchEventResult[] };
 
 type RequestOptions = {
   baseUrl: string;
@@ -72,5 +86,6 @@ export function createCircleClient({ baseUrl, credentials, headers }: RequestOpt
     pauseSharing: (id: string, sessionId: string) => request<CircleSharing>(
       "/circles/" + encodeURIComponent(id) + "/tracking-sessions/" + encodeURIComponent(sessionId) + "/pause", "POST", {},
     ),
+    uploadLocationBatch: (input: z.input<typeof locationBatch>) => request<LocationBatchResult>("/location-batches", "POST", input),
   };
 }

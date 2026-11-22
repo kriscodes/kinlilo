@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { CircleSharing, Device } from "@kinlilo/contracts";
+import type { CircleSharing, Device, LocationBatchResult, TrackingSession } from "@kinlilo/contracts";
 import { once } from "node:events";
 import { randomUUID, createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
@@ -215,6 +215,114 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
     assert.equal((await start(winner.cookie, phone.id, leaving.body.version)).status, 409);
     assert.equal((await pause(winner.cookie, leaving.body.activeSession.id)).status, 404);
   });
+
+  await t.test("active sessions ingest location batches without moving the latest fix backward", async () => {
+    const cookie = winner.cookie;
+    const userId = winner.body.user.id as string;
+    const circleId = create.body.id as string;
+    const sharing = () => request(path + "/sharing", { cookie });
+    const sessionsPath = path + "/tracking-sessions";
+    const register = async () => {
+      const response = await request("/v1/devices", { cookie, data: { installationId: randomUUID(), label: "Location test" } });
+      assert.equal(response.status, 201);
+      return response.body as Device;
+    };
+    const start = async (device: Device) => {
+      const { body } = await sharing();
+      const response = await request(sessionsPath, { cookie, data: { deviceId: device.id, version: body.version } });
+      assert.equal(response.status, 201);
+      const state = response.body as CircleSharing;
+      assert.ok(state.activeSession);
+      return state.activeSession;
+    };
+    const fix = (session: TrackingSession, offsetMs = 1_000) => ({
+      eventId: randomUUID(), capturedAt: new Date(Date.parse(session.startedAt) + offsetMs).toISOString(),
+      latitude: 12.25, longitude: -45.5, accuracyM: 4,
+    });
+    const upload = (session: TrackingSession, events: object[], sessionCookie: string | undefined = cookie) =>
+      request("/v1/location-batches", { cookie: sessionCookie, data: { sessionId: session.id, events } });
+    const latest = async () => (await pool.query<{ event_id: string; captured_at: Date; accuracy_m: number }>(`
+      SELECT event_id, latest_locations.captured_at, accuracy_m FROM latest_locations
+      JOIN location_points ON location_points.id = latest_locations.point_id
+      WHERE latest_locations.circle_id = $1 AND latest_locations.user_id = $2
+    `, [circleId, userId])).rows[0];
+    const countPoints = async () => (await pool.query<{ points: number }>(`
+      SELECT count(*)::int AS points FROM location_points WHERE circle_id = $1 AND user_id = $2
+    `, [circleId, userId])).rows[0].points;
+
+    const phone = await register();
+    const spare = await register();
+    const firstSession = await start(phone);
+    const newest = fix(firstSession, 3_000);
+    const older = fix(firstSession);
+    const beforeSession = fix(firstSession, -1);
+    const future = fix(firstSession, 60 * 60 * 1_000);
+    assert.equal((await upload(firstSession, [newest], "")).status, 401);
+    assert.equal((await upload(firstSession, [newest], owner.cookie)).status, 404);
+    assert.equal((await upload(firstSession, [newest, { ...older, latitude: 91 }])).status, 400);
+    assert.equal((await upload(firstSession, [{ ...older, accuracyM: -1 }])).status, 400);
+    assert.equal((await upload(firstSession, [{ ...older, extra: "x".repeat(33_000) }])).status, 413);
+    assert.equal(await countPoints(), 0);
+
+    const batch = await upload(firstSession, [newest, beforeSession, { ...newest, eventId: newest.eventId.toUpperCase() }, future]);
+    assert.equal(batch.status, 200);
+    const receipt = batch.body as LocationBatchResult;
+    assert.ok(Number.isFinite(Date.parse(receipt.serverTime)));
+    assert.deepEqual(receipt.results, [
+      { eventId: newest.eventId, status: "accepted" },
+      { eventId: beforeSession.eventId, status: "rejected", reason: "before_session" },
+      { eventId: newest.eventId.toUpperCase(), status: "duplicate" },
+      { eventId: future.eventId, status: "rejected", reason: "future_timestamp" },
+    ]);
+    const duplicateRace = await Promise.all([upload(firstSession, [older]), upload(firstSession, [older])]);
+    assert.deepEqual(duplicateRace.map(response => response.status), [200, 200]);
+    assert.deepEqual(duplicateRace.map(response => response.body.results[0].status).sort(), ["accepted", "duplicate"]);
+    const retry = await upload(firstSession, Array(100).fill(newest));
+    assert.equal(retry.status, 200);
+    assert.equal(retry.body.results.length, 100);
+    assert.ok((retry.body as LocationBatchResult).results.every(result => result.status === "duplicate"));
+    assert.equal((await upload(firstSession, Array(101).fill(newest))).status, 400);
+    assert.deepEqual((await upload(firstSession, [{ ...newest, accuracyM: 8 }])).body.results, [
+      { eventId: newest.eventId, status: "rejected", reason: "event_conflict" },
+    ]);
+    assert.equal(await countPoints(), 2);
+    assert.deepEqual(await latest(), { event_id: newest.eventId, captured_at: new Date(newest.capturedAt), accuracy_m: 4 });
+
+    assert.equal((await request(`${sessionsPath}/${firstSession.id}/pause`, { cookie, data: {} })).status, 200);
+    assert.equal(await latest(), undefined);
+    assert.equal(await countPoints(), 2);
+    assert.equal((await upload(firstSession, [newest])).status, 404);
+    const resumed = await start(phone);
+    const fresh = fix(resumed);
+    assert.deepEqual((await upload(resumed, [{ ...fresh, eventId: newest.eventId }, fresh])).body.results, [
+      { eventId: newest.eventId, status: "rejected", reason: "event_conflict" },
+      { eventId: fresh.eventId, status: "accepted" },
+    ]);
+    assert.equal((await latest())?.event_id, fresh.eventId);
+
+    const replacement = await start(spare);
+    assert.equal(await latest(), undefined);
+    assert.equal((await upload(resumed, [fresh])).status, 404);
+    const spareFix = fix(replacement);
+    assert.equal((await upload(replacement, [spareFix])).status, 200);
+    assert.equal((await latest())?.event_id, spareFix.eventId);
+    const [racingUpload, revoked] = await Promise.all([
+      upload(replacement, [fix(replacement, 2_000)]),
+      request(`/v1/devices/${spare.id}/revoke`, { cookie, data: {} }),
+    ]);
+    assert.ok([200, 404].includes(racingUpload.status));
+    assert.equal(revoked.status, 200);
+    assert.equal((await upload(replacement, [spareFix])).status, 404);
+    assert.equal(await latest(), undefined);
+
+    const leaving = await start(phone);
+    assert.equal((await upload(leaving, [fix(leaving)])).body.results[0].status, "accepted");
+    assert.equal((await request(path + "/leave", { cookie, data: {} })).status, 200);
+    assert.equal((await upload(leaving, [fix(leaving)])).status, 404);
+    assert.equal(await latest(), undefined);
+    assert.equal(await countPoints(), 0);
+  });
+
   assert.equal((await request("/api/auth/sign-out", { cookie: owner.cookie, data: {} })).status, 200);
   assert.equal((await request("/v1/circles", { cookie: owner.cookie })).status, 401);
 });
