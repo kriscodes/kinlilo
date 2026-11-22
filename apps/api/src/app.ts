@@ -6,6 +6,7 @@ import { createAuth } from "./auth";
 import { createCirclesRouter, RequestError } from "./circles";
 import type { Config } from "./config";
 import { connectDatabase } from "./db";
+import { createSharingRouter } from "./sharing";
 
 export function createApp(config: Config) {
   const { pool, db } = connectDatabase(config.databaseUrl);
@@ -56,6 +57,7 @@ export function createApp(config: Config) {
     handler: (_req, _res, next) => next(new RequestError(429, "Too many requests. Try again in a minute.")),
   }));
   app.use("/v1/circles", createCirclesRouter(db));
+  app.use("/v1", createSharingRouter(db));
   app.use((_req, _res, next) => next(new RequestError(404, "Page not found.")));
 
   const handleError: ErrorRequestHandler = (error, _req, res, _next) => {

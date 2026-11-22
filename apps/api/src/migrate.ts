@@ -7,6 +7,10 @@ import { connectDatabase } from "./db";
 const config = readConfig();
 const { pool } = connectDatabase(config.databaseUrl);
 const connection = await pool.connect();
+const migrations = [
+  { version: 1, filename: "001-circles.sql" },
+  { version: 2, filename: "002-sharing.sql" },
+];
 
 try {
   // Keep simultaneous local migration runs from changing the schema concurrently.
@@ -16,11 +20,13 @@ try {
   await runMigrations();
   await connection.query("BEGIN");
   await connection.query("CREATE TABLE IF NOT EXISTS kinlilo_migrations (version integer PRIMARY KEY)");
-  const applied = await connection.query("SELECT version FROM kinlilo_migrations WHERE version = 1");
-  if (!applied.rowCount) {
-    const migration = await readFile(new URL("../migrations/001-circles.sql", import.meta.url), "utf8");
+  const applied = await connection.query<{ version: number }>("SELECT version FROM kinlilo_migrations");
+  const appliedVersions = new Set(applied.rows.map(row => row.version));
+  for (const { version, filename } of migrations) {
+    if (appliedVersions.has(version)) continue;
+    const migration = await readFile(new URL("../migrations/" + filename, import.meta.url), "utf8");
     await connection.query(migration);
-    await connection.query("INSERT INTO kinlilo_migrations (version) VALUES (1)");
+    await connection.query("INSERT INTO kinlilo_migrations (version) VALUES ($1)", [version]);
   }
   await connection.query("COMMIT");
   console.log("Kinlilo database is ready.");

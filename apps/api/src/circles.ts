@@ -2,9 +2,7 @@ import { acceptInvite, circleId, createCircle } from "@kinlilo/contracts";
 import { and, asc, count, eq, gt, isNull, sql } from "drizzle-orm";
 import { Router } from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { authUsers, circles, invites, memberships, type connectDatabase } from "./db";
-
-type Database = ReturnType<typeof connectDatabase>["db"];
+import { authUsers, circles, invites, lockAccount, memberships, type Database } from "./db";
 type Locals = { userId: string };
 
 class RequestError extends Error {
@@ -118,10 +116,14 @@ export function createCirclesRouter(db: Database) {
     const id = readId(req.params.id);
     const circle = await summary(id, res.locals.userId);
     if (circle.role === "owner") throw new RequestError(409, "The owner cannot leave their circle.");
-    const [removed] = await db.delete(memberships)
-      .where(and(eq(memberships.circleId, id), eq(memberships.userId, res.locals.userId), eq(memberships.role, "member")))
-      .returning({ id: memberships.userId });
-    if (!removed) throw new RequestError(404, "Circle not found.");
+    const userId = res.locals.userId;
+    await db.transaction(async tx => {
+      if (!await lockAccount(tx, userId)) throw new RequestError(401, "Sign in to continue.");
+      const [removed] = await tx.delete(memberships)
+        .where(and(eq(memberships.circleId, id), eq(memberships.userId, userId), eq(memberships.role, "member")))
+        .returning({ id: memberships.userId });
+      if (!removed) throw new RequestError(404, "Circle not found.");
+    });
     res.json({ ok: true });
   });
 

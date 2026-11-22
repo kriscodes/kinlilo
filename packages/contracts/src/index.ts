@@ -5,6 +5,13 @@ export const createCircle = z.object({ name: z.string().trim().min(1).max(60) })
 export const acceptInvite = z.object({
   code: z.string().trim().regex(/^[A-Za-z0-9_-]{43}$/),
 }).strict();
+export const deviceId = z.uuid();
+export const trackingSessionId = z.uuid();
+export const registerDevice = z.object({
+  installationId: z.uuid(),
+  label: z.string().trim().min(1).max(60),
+}).strict();
+export const startSharing = z.object({ deviceId, version: z.uuid() }).strict();
 
 export type CircleRole = "owner" | "member";
 export type Circle = {
@@ -16,6 +23,9 @@ export type Circle = {
 export type CircleMember = { id: string; name: string; role: CircleRole };
 export type CircleDetails = Circle & { members: CircleMember[] };
 export type CircleInvite = { code: string; expiresAt: string };
+export type Device = { id: string; label: string; registeredAt: string; revokedAt: string | null };
+export type TrackingSession = { id: string; deviceId: string; startedAt: string };
+export type CircleSharing = { version: string; activeSession: TrackingSession | null };
 
 type RequestOptions = {
   baseUrl: string;
@@ -51,6 +61,16 @@ export function createCircleClient({ baseUrl, credentials, headers }: RequestOpt
     join: (code: string) => request<Circle>("/circles/join", "POST", { code }),
     leave: (id: string) => request<{ ok: true }>(
       "/circles/" + encodeURIComponent(id) + "/leave", "POST", {},
+    ),
+    listDevices: () => request<{ devices: Device[] }>("/devices"),
+    registerDevice: (input: z.input<typeof registerDevice>) => request<Device>("/devices", "POST", input),
+    revokeDevice: (id: string) => request<Device>("/devices/" + encodeURIComponent(id) + "/revoke", "POST", {}),
+    getSharing: (id: string) => request<CircleSharing>("/circles/" + encodeURIComponent(id) + "/sharing"),
+    startSharing: (id: string, input: z.input<typeof startSharing>) => request<CircleSharing>(
+      "/circles/" + encodeURIComponent(id) + "/tracking-sessions", "POST", input,
+    ),
+    pauseSharing: (id: string, sessionId: string) => request<CircleSharing>(
+      "/circles/" + encodeURIComponent(id) + "/tracking-sessions/" + encodeURIComponent(sessionId) + "/pause", "POST", {},
     ),
   };
 }
