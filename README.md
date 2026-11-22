@@ -10,7 +10,7 @@ This workspace implements email and password accounts, private circles, and invi
 
 The web and native apps use the same Express API and PostgreSQL database. Better Auth manages credentials and revocable sessions. The web uses an HTTP-only cookie. The Expo client stores its session cookie in SecureStore. Invitation codes are stored as hashes. Circle access is checked against current membership, and membership alone does not enable location sharing.
 
-The iOS app can opt into location capture and sync an encrypted outbox to the API. Web and iOS show the selected circle’s last reported locations. History views, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
+The iOS app can opt into location capture and sync an encrypted outbox to the API. Web and iOS show the selected circle’s last reported locations and date-filtered history. Verification email and account recovery are future work. Use synthetic accounts and a local database for this review.
 
 ### Start the web app
 
@@ -71,9 +71,13 @@ Select **Open iOS location test**, request **When In Use** then **Always**, and 
 ### Check the workspace
 
 ```sh
+pnpm lint
+pnpm format:check
 pnpm typecheck
 pnpm build
 ```
+
+Run `pnpm format` to apply the workspace formatting rules. On macOS with Xcode and CocoaPods, run `pnpm build:ios:smoke` from a checkout without a generated `apps/mobile/ios` directory. It builds an unsigned Simulator release and verifies the bundled JavaScript, SQLCipher, and iOS background location configuration. GitHub Actions runs these checks and the PostgreSQL integration suite.
 
 For the PostgreSQL integration test, create a separate loopback database called `kinlilo_test`, migrate it and run the suite. With the example Docker settings:
 

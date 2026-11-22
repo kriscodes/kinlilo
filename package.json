@@ -14,6 +14,7 @@
     "format:check": "prettier --check --ignore-path .gitignore --ignore-path .prettierignore .",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @kinlilo/web build",
+    "build:ios:smoke": "bash scripts/build-ios-smoke.sh",
     "test:integration": "pnpm --filter @kinlilo/api test:integration"
   },
   "devDependencies": {
