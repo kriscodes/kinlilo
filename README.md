@@ -89,6 +89,10 @@ pnpm test:integration
 
 Override `KINLILO_TEST_DATABASE_URL` for different local credentials. Tests use synthetic users and a dedicated test database.
 
+### Validate a staging candidate
+
+Open a pull request into `staging` or fast-forward that branch to the candidate commit. Pushes to `staging` run the normal checks and the native release build, then start the production web build and API against a fresh PostgreSQL database in the GitHub Actions `staging` environment. The smoke check signs up a synthetic user through the web proxy, creates a circle, and verifies that location data requires authentication and is never cached. The runner shuts down the stack after the check.
+
 ## Workspace layout
 
 - `apps/web` is the Next.js app, using the pale lilac design with plum primary buttons.

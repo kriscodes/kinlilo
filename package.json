@@ -15,6 +15,7 @@
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @kinlilo/web build",
     "build:ios:smoke": "bash scripts/build-ios-smoke.sh",
+    "smoke:staging": "node --env-file-if-exists=.env scripts/smoke-staging.mjs",
     "test:integration": "pnpm --filter @kinlilo/api test:integration"
   },
   "devDependencies": {
