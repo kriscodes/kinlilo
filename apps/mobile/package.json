@@ -1,0 +1,27 @@
+{
+  "name": "@kinlilo/mobile",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "dev": "expo start",
+    "typecheck": "tsc",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@better-auth/expo": "1.7.27",
+    "@kinlilo/contracts": "workspace:*",
+    "better-auth": "1.7.27",
+    "expo": "55.0.32",
+    "expo-constants": "~55.0.17",
+    "expo-linking": "~55.0.17",
+    "expo-network": "~55.0.18",
+    "expo-secure-store": "~55.0.18",
+    "expo-web-browser": "~55.0.20",
+    "react": "19.2.0",
+    "react-native": "0.83.10"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/node": "22.19.11"
+  }
+}

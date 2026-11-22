@@ -1,0 +1,19 @@
+{
+  "name": "kinlilo",
+  "private": true,
+  "packageManager": "pnpm@11.28.12",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @kinlilo/api --filter @kinlilo/web dev",
+    "dev:mobile": "pnpm --filter @kinlilo/mobile dev",
+    "db:migrate": "pnpm --filter @kinlilo/api db:migrate",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm --filter @kinlilo/web build",
+    "test:integration": "pnpm --filter @kinlilo/api test:integration"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
