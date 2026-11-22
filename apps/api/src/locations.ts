@@ -90,17 +90,17 @@ export function createLocationsRouter(db: Database, retentionDays: number) {
         eq(locationPoints.deviceId, session.deviceId),
         inArray(locationPoints.eventId, events.map(event => event.eventId)),
       ));
-      const seen = new Map(stored.map(point => [point.eventId, point]));
-      const points: NewPoint[] = [];
+      const knownEvents = new Map(stored.map(point => [point.eventId, point]));
+      const pointsToInsert: NewPoint[] = [];
       const results: LocationBatchEventResult[] = [];
-      const latestAllowed = session.receivedAt.getTime() + maximumClockSkewMs;
-      let latest: NewPoint | undefined;
+      const latestAllowedCaptureMs = session.receivedAt.getTime() + maximumClockSkewMs;
+      let latestAcceptedPoint: NewPoint | undefined;
 
       for (const event of events) {
         const { eventId, latitude, longitude, accuracyM } = event;
-        const key = eventId.toLowerCase();
+        const normalizedEventId = eventId.toLowerCase();
         const capturedAt = new Date(event.capturedAt);
-        const previous = seen.get(key);
+        const previous = knownEvents.get(normalizedEventId);
         if (previous) {
           const matches = previous.sessionId === session.id
             && previous.capturedAt.getTime() === capturedAt.getTime()
@@ -112,30 +112,31 @@ export function createLocationsRouter(db: Database, retentionDays: number) {
           results.push({ eventId, status: "rejected", reason: "before_session" });
           continue;
         }
-        if (capturedAt.getTime() > latestAllowed) {
+        if (capturedAt.getTime() > latestAllowedCaptureMs) {
           results.push({ eventId, status: "rejected", reason: "future_timestamp" });
           continue;
         }
 
         const point = {
           id: randomUUID(), sessionId: session.id, circleId: session.circleId, userId, deviceId: session.deviceId,
-          eventId: key, capturedAt, receivedAt: session.receivedAt, latitude, longitude, accuracyM,
+          eventId: normalizedEventId, capturedAt, receivedAt: session.receivedAt, latitude, longitude, accuracyM,
         };
-        seen.set(key, point);
-        points.push(point);
+        knownEvents.set(normalizedEventId, point);
+        pointsToInsert.push(point);
         results.push({ eventId, status: "accepted" });
-        if (!latest || capturedAt > latest.capturedAt || (capturedAt.getTime() === latest.capturedAt.getTime() && point.id > latest.id)) {
-          latest = point;
+        if (!latestAcceptedPoint || capturedAt > latestAcceptedPoint.capturedAt
+          || (capturedAt.getTime() === latestAcceptedPoint.capturedAt.getTime() && point.id > latestAcceptedPoint.id)) {
+          latestAcceptedPoint = point;
         }
       }
 
-      if (latest) {
-        await tx.insert(locationPoints).values(points);
+      if (latestAcceptedPoint) {
+        await tx.insert(locationPoints).values(pointsToInsert);
         await tx.insert(latestLocations).values({
-          circleId: session.circleId, userId, capturedAt: latest.capturedAt, pointId: latest.id,
+          circleId: session.circleId, userId, capturedAt: latestAcceptedPoint.capturedAt, pointId: latestAcceptedPoint.id,
         }).onConflictDoUpdate({
           target: [latestLocations.circleId, latestLocations.userId],
-          set: { capturedAt: latest.capturedAt, pointId: latest.id },
+          set: { capturedAt: latestAcceptedPoint.capturedAt, pointId: latestAcceptedPoint.id },
           setWhere: sql`(excluded.captured_at, excluded.point_id) > (${latestLocations.capturedAt}, ${latestLocations.pointId})`,
         });
       }

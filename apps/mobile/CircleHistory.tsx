@@ -1,5 +1,5 @@
 import {
-  describeFix, hasHistoryGap, historyDay, historyLocationMarkers, historyPaths, localDateString, type CircleDetails,
+  describeFix, hasHistoryGap, getLocalDayRange, historyLocationMarkers, buildHistoryPaths, localDateString, type CircleDetails,
 } from "@kinlilo/contracts";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useCallback, useState } from "react";
@@ -27,7 +27,7 @@ function HistoryPage({ circleId, memberId, from, to, cursor, previous, next }: {
       {nextCursor && <Pressable accessibilityRole="button" style={styles.button} onPress={() => next(nextCursor)}><Text style={styles.label}>Later fixes</Text></Pressable>}
     </View>}
     {points.length > 0 && <>
-      <CircleMap markers={historyLocationMarkers(points)} paths={historyPaths(points)} label="Map of recorded fixes" />
+      <CircleMap markers={historyLocationMarkers(points)} paths={buildHistoryPaths(points)} label="Map of recorded fixes" />
       <Text accessibilityRole="header" style={styles.label}>Recorded fixes</Text>
       {points.map((point, index) => <View key={point.id} style={styles.fix}>
         {hasHistoryGap(points[index - 1], point) && <Text style={styles.gap}>Gap in reporting</Text>}
@@ -43,7 +43,7 @@ export default function CircleHistory({ circle, viewerId }: { circle: CircleDeta
   const [date, setDate] = useState(() => new Date());
   const [pages, setPages] = useState<(string | null)[]>([null]);
   const cursor = pages.at(-1) ?? undefined;
-  const day = historyDay(localDateString(date));
+  const day = getLocalDayRange(localDateString(date));
   return <>
     <Text accessibilityRole="header" style={styles.title}>Location history</Text>
     <Text style={styles.label}>Circle member</Text>

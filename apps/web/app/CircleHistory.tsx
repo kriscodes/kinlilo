@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  describeFix, hasHistoryGap, historyDay, historyLocationMarkers, historyPaths, localDateString,
+  describeFix, hasHistoryGap, getLocalDayRange, historyLocationMarkers, buildHistoryPaths, localDateString,
   type CircleDetails, type createCircleClient,
 } from "@kinlilo/contracts";
 import dynamic from "next/dynamic";
@@ -29,7 +29,7 @@ function HistoryPage({ circleId, memberId, from, to, cursor, load, previous, nex
       {nextCursor && <button type="button" className="outline" onClick={() => next(nextCursor)}>Later fixes</button>}
     </div>}
     {points.length > 0 && <>
-      <CircleMap markers={historyLocationMarkers(points)} paths={historyPaths(points)} label="Map of recorded fixes" />
+      <CircleMap markers={historyLocationMarkers(points)} paths={buildHistoryPaths(points)} label="Map of recorded fixes" />
       <ol className="roster history-timeline" aria-label="Recorded fixes">
         {points.map((point, index) => <li key={point.id}>
           {hasHistoryGap(points[index - 1], point) && <strong className="history-gap">Gap in reporting</strong>}
@@ -47,7 +47,7 @@ export default function CircleHistory({ circle, viewerId, load }: { circle: Circ
   const [date, setDate] = useState(today);
   const [pages, setPages] = useState<(string | null)[]>([null]);
   const cursor = pages.at(-1) ?? undefined;
-  const day = date <= today ? historyDay(date) : null;
+  const day = date <= today ? getLocalDayRange(date) : null;
 
   return <section aria-label="Location history">
     <h3>Location history</h3>

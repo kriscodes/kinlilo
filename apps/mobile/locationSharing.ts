@@ -17,11 +17,11 @@ const initialRetryMs = 2_000;
 const maximumRetryMs = 60_000;
 let retryDelayMs = initialRetryMs;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
-let running: AbortController | undefined;
+let activeSyncController: AbortController | undefined;
 let syncRequested = false;
-let account: string | null | undefined;
-let controlTail: Promise<unknown> = Promise.resolve();
-let controlsPending = 0;
+let signedInAccountId: string | null | undefined;
+let sharingActionQueue: Promise<unknown> = Promise.resolve();
+let sharingActionsPending = 0;
 
 let snapshot: { state: SharingStatus | null; error: string | null } = { state: null, error: null };
 const listeners = new Set<() => void>();
@@ -49,20 +49,20 @@ function clearRetry() {
   retryTimer = undefined;
 }
 
-function changeSharing<T>(action: () => Promise<T>) {
-  controlsPending++;
-  running?.abort();
-  const next = controlTail.then(action);
-  controlTail = next.catch(() => {});
+function queueSharingAction<T>(action: () => Promise<T>) {
+  sharingActionsPending++;
+  activeSyncController?.abort();
+  const next = sharingActionQueue.then(action);
+  sharingActionQueue = next.catch(() => {});
   return next.finally(async () => {
-    controlsPending--;
+    sharingActionsPending--;
     await publishStatus();
     requestSync(true);
   });
 }
 
 export function startLocationSharing(accountId: string, circleId: string) {
-  return changeSharing(async () => {
+  return queueSharingAction(async () => {
     if (!locationSharingAvailable || !await TaskManager.isAvailableAsync()) throw new Error("Use a native iOS build to share location.");
     if (!supportsLocationUploads()) throw new Error("Configure an HTTPS API URL before sharing location.");
     if (await getOutboxStatus()) throw new Error("Pause sharing from this iPhone before starting another session.");
@@ -72,7 +72,7 @@ export function startLocationSharing(accountId: string, circleId: string) {
     if (!foreground.granted) throw new Error("Allow location access in iOS Settings before sharing.");
     const background = await Location.requestBackgroundPermissionsAsync();
     if (!background.granted) throw new Error("Set Kinlilo’s location permission to Always in iOS Settings.");
-    if (account !== accountId) throw new Error("Sign in again before sharing.");
+    if (signedInAccountId !== accountId) throw new Error("Sign in again before sharing.");
 
     const current = await api.getSharing(circleId);
     const device = await api.registerDevice({ installationId, label: "iPhone" });
@@ -82,11 +82,11 @@ export function startLocationSharing(accountId: string, circleId: string) {
     try {
       await activateOutbox({ accountId, circleId, sessionId, captureAfter: Math.max(Date.now(), Date.parse(startedAt)) });
     } catch (error) {
-      if (account === accountId) await api.pauseSharing(circleId, sessionId).catch(() => {});
+      if (signedInAccountId === accountId) await api.pauseSharing(circleId, sessionId).catch(() => {});
       throw error;
     }
     try {
-      if (account !== accountId) throw new Error("Sign in again before sharing.");
+      if (signedInAccountId !== accountId) throw new Error("Sign in again before sharing.");
       await Location.startLocationUpdatesAsync(taskName, {
         accuracy: Location.Accuracy.High,
         distanceInterval: 50,
@@ -113,7 +113,7 @@ async function pauseOnDevice(target?: SharingTarget) {
 }
 
 export function pauseLocationSharing(target?: SharingTarget) {
-  return changeSharing(() => pauseOnDevice(target));
+  return queueSharingAction(() => pauseOnDevice(target));
 }
 
 async function confirmPause(local: SharingStatus, signal: AbortSignal) {
@@ -127,7 +127,7 @@ async function confirmPause(local: SharingStatus, signal: AbortSignal) {
 
 export function pauseBeforeSigningOut(accountId: string) {
   if (!locationSharingAvailable) return;
-  return changeSharing(async () => {
+  return queueSharingAction(async () => {
     const local = await pauseOnDevice({ accountId });
     if (!local || (await Network.getNetworkStateAsync()).isConnected === false) return;
     const controller = new AbortController();
@@ -138,7 +138,7 @@ export function pauseBeforeSigningOut(accountId: string) {
   });
 }
 
-function readReceipt(events: LocationEvent[], receipt: LocationBatchResult) {
+function validateBatchReceipt(events: LocationEvent[], receipt: LocationBatchResult) {
   const remaining = new Set(events.map(event => event.eventId));
   const eventIds: string[] = [];
   let rejected = 0;
@@ -186,7 +186,7 @@ async function syncSharing(accountId: string, signal: AbortSignal) {
     try { receipt = await api.uploadLocationBatch({ sessionId: local.sessionId, events }, signal); }
     catch (error) {
       if (signal.aborted || !(error instanceof ApiError && error.status === 404)) throw error;
-      await changeSharing(async () => {
+      await queueSharingAction(async () => {
         const current = await getOutboxStatus();
         if (current?.sessionId !== local.sessionId) return;
         await pauseOutbox(local.sessionId);
@@ -196,7 +196,7 @@ async function syncSharing(accountId: string, signal: AbortSignal) {
       return;
     }
     if (signal.aborted) return;
-    const { eventIds, rejected } = readReceipt(events, receipt);
+    const { eventIds, rejected } = validateBatchReceipt(events, receipt);
     await acknowledgeBatch(local.sessionId, eventIds, rejected);
   }
 }
@@ -204,10 +204,10 @@ async function syncSharing(accountId: string, signal: AbortSignal) {
 function requestSync(immediate = false) {
   // The current account session is used only while the app is active. The iOS task only queues fixes.
   if (immediate) clearRetry();
-  if (!locationSharingAvailable || !account || AppState.currentState !== "active" || controlsPending || retryTimer) return;
-  if (running) { syncRequested = true; return; }
+  if (!locationSharingAvailable || !signedInAccountId || AppState.currentState !== "active" || sharingActionsPending || retryTimer) return;
+  if (activeSyncController) { syncRequested = true; return; }
   const controller = new AbortController();
-  running = controller;
+  activeSyncController = controller;
   let timedOut = false;
   const deadline = setTimeout(() => { timedOut = true; controller.abort(); }, 15_000);
   function scheduleRetry(error?: unknown) {
@@ -215,26 +215,26 @@ function requestSync(immediate = false) {
     retryDelayMs = Math.min(maximumRetryMs, retryDelayMs * 2);
     retryTimer = setTimeout(() => { retryTimer = undefined; requestSync(); }, delay);
   }
-  void syncSharing(account, controller.signal).then(() => {
+  void syncSharing(signedInAccountId, controller.signal).then(() => {
     if (timedOut) scheduleRetry();
     else if (!controller.signal.aborted) retryDelayMs = initialRetryMs;
   }).catch(error => {
     if (timedOut || !controller.signal.aborted) scheduleRetry(error);
   }).finally(async () => {
     clearTimeout(deadline);
-    running = undefined;
+    activeSyncController = undefined;
     await publishStatus();
     if (syncRequested) { syncRequested = false; requestSync(); }
   });
 }
 
 export function setSharingAccount(accountId: string | null | undefined) {
-  if (!locationSharingAvailable || account === accountId) return;
-  account = accountId;
-  running?.abort();
+  if (!locationSharingAvailable || signedInAccountId === accountId) return;
+  signedInAccountId = accountId;
+  activeSyncController?.abort();
   if (accountId !== undefined) {
     void getOutboxStatus().then(state => {
-      if (account === accountId && state?.phase === "active" && state.accountId !== accountId) {
+      if (signedInAccountId === accountId && state?.phase === "active" && state.accountId !== accountId) {
         return pauseLocationSharing({ sessionId: state.sessionId });
       }
     }).catch(() => {});
@@ -247,13 +247,13 @@ export function watchLocationSharing() {
   void publishStatus().then(() => { if (snapshot.state?.phase === "pausing") return stopCapture(); }).catch(() => {});
   const foreground = AppState.addEventListener("change", state => {
     if (state === "active") { void publishStatus(); requestSync(true); }
-    else { clearRetry(); running?.abort(); }
+    else { clearRetry(); activeSyncController?.abort(); }
   });
   const network = Network.addNetworkStateListener(state => {
     if (state.isConnected) requestSync(true);
-    else if (state.isConnected === false) running?.abort();
+    else if (state.isConnected === false) activeSyncController?.abort();
   });
-  return () => { foreground.remove(); network.remove(); clearRetry(); running?.abort(); };
+  return () => { foreground.remove(); network.remove(); clearRetry(); activeSyncController?.abort(); };
 }
 
 if (locationSharingAvailable) {

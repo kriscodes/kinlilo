@@ -32,7 +32,7 @@ export function localDateString(date: Date) {
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
 }
 
-export function historyDay(value: string) {
+export function getLocalDayRange(value: string) {
   if (!z.iso.date().safeParse(value).success) return null;
   const start = new Date(value + "T00:00:00");
   if (localDateString(start) !== value) return null;
@@ -47,7 +47,7 @@ export function hasHistoryGap(previous: HistoryPoint | undefined, point: History
     || Date.parse(point.capturedAt) - Date.parse(previous.capturedAt) > 10 * 60_000);
 }
 
-export function historyPaths(points: HistoryPoint[]) {
+export function buildHistoryPaths(points: HistoryPoint[]) {
   const paths: HistoryPoint[][] = [];
   let previous: HistoryPoint | undefined;
   for (const point of points) {

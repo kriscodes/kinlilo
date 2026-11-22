@@ -9,7 +9,7 @@ class RequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
-function readId(value: unknown) {
+function parseCircleId(value: unknown) {
   const parsed = circleId.safeParse(value);
   if (!parsed.success) throw new RequestError(404, "Circle not found.");
   return parsed.data;
@@ -22,14 +22,14 @@ function hashCode(code: string) {
 export function createCirclesRouter(db: Database) {
   const router = Router();
 
-  async function summary(id: string, userId: string) {
+  async function getCircleSummaryForMember(requestedCircleId: string, userId: string) {
     const [circle] = await db.select({
       id: circles.id,
       name: circles.name,
       role: memberships.role,
       memberCount: db.$count(memberships, eq(memberships.circleId, circles.id)),
     }).from(memberships).innerJoin(circles, eq(circles.id, memberships.circleId))
-      .where(and(eq(memberships.userId, userId), eq(memberships.circleId, id)));
+      .where(and(eq(memberships.userId, userId), eq(memberships.circleId, requestedCircleId)));
 
     if (!circle) throw new RequestError(404, "Circle not found.");
     return circle;
@@ -85,9 +85,9 @@ export function createCirclesRouter(db: Database) {
   });
 
   router.get<{ id: string }, unknown, unknown, unknown, Locals>("/:id", async (req, res) => {
-    const id = readId(req.params.id);
+    const id = parseCircleId(req.params.id);
     const userId = res.locals.userId;
-    const circle = await summary(id, userId);
+    const circle = await getCircleSummaryForMember(id, userId);
     const viewer = db.select({ id: memberships.circleId }).from(memberships)
       .where(and(eq(memberships.circleId, id), eq(memberships.userId, userId)));
     const members = await db.select({
@@ -102,8 +102,8 @@ export function createCirclesRouter(db: Database) {
   });
 
   router.post<{ id: string }, unknown, unknown, unknown, Locals>("/:id/invites", async (req, res) => {
-    const id = readId(req.params.id);
-    const circle = await summary(id, res.locals.userId);
+    const id = parseCircleId(req.params.id);
+    const circle = await getCircleSummaryForMember(id, res.locals.userId);
     if (circle.role !== "owner") throw new RequestError(403, "Only the circle owner can create invitations.");
 
     const code = randomBytes(32).toString("base64url");
@@ -113,8 +113,8 @@ export function createCirclesRouter(db: Database) {
   });
 
   router.post<{ id: string }, unknown, unknown, unknown, Locals>("/:id/leave", async (req, res) => {
-    const id = readId(req.params.id);
-    const circle = await summary(id, res.locals.userId);
+    const id = parseCircleId(req.params.id);
+    const circle = await getCircleSummaryForMember(id, res.locals.userId);
     if (circle.role === "owner") throw new RequestError(409, "The owner cannot leave their circle.");
     const userId = res.locals.userId;
     await db.transaction(async tx => {

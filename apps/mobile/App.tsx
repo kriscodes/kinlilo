@@ -114,12 +114,12 @@ function CircleHome({ name, accountId, sharing }: {
     finally { setBusy(false); }
   }
 
-  async function open(id: string) {
+  async function openCircle(circleId: string) {
     setInvite(null);
-    setSelected(await api.get(id));
+    setSelected(await api.get(circleId));
   }
 
-  async function refresh() {
+  async function refreshCircles() {
     setCircles((await api.list()).circles);
   }
 
@@ -136,20 +136,20 @@ function CircleHome({ name, accountId, sharing }: {
       {circles === null && !error && <ActivityIndicator />}
       {circles?.length === 0 && <Text style={styles.muted}>You haven’t joined a circle yet.</Text>}
       {circles?.map(circle => <Button key={circle.id} title={circle.name} secondary disabled={busy}
-        onPress={() => void run(() => open(circle.id))} />)}
+        onPress={() => void run(() => openCircle(circle.id))} />)}
       <Field label="New circle name" value={circleName} onChangeText={setCircleName} maxLength={60} />
       <Button title="Create circle" disabled={busy || !circleName.trim()} onPress={() => void run(async () => {
         const circle = await api.create(circleName);
         setCircleName("");
-        await refresh();
-        await open(circle.id);
+        await refreshCircles();
+        await openCircle(circle.id);
       })} />
       <Field label="Invitation code" value={code} onChangeText={setCode} maxLength={64} />
       <Button title="Join circle" disabled={busy || !code.trim()} onPress={() => void run(async () => {
         const circle = await api.join(code);
         setCode("");
-        await refresh();
-        await open(circle.id);
+        await refreshCircles();
+        await openCircle(circle.id);
       })} />
     </View>
     {selected && <View style={styles.card}>
@@ -172,7 +172,7 @@ function CircleHome({ name, accountId, sharing }: {
           if (locationSharingAvailable) await pauseLocationSharing({ accountId, circleId: selected.id });
           await api.leave(selected.id);
           setSelected(null);
-          await refresh();
+          await refreshCircles();
         })} />}
       {invite && <>
         <Text style={styles.label}>Invitation code</Text>

@@ -107,14 +107,14 @@ export function createSharingRouter(db: Database) {
     const id = requireId(circleId, req.params.circleId, "Circle not found.");
     const parsed = startSharing.safeParse(req.body);
     if (!parsed.success) throw new RequestError(400, "A valid device ID and sharing version are required.");
-    const { deviceId: idOfDevice, version: expectedVersion } = parsed.data;
+    const { deviceId: requestedDeviceId, version: expectedVersion } = parsed.data;
     const userId = res.locals.userId;
     const state = await db.transaction(async tx => {
       if (!await lockAccount(tx, userId)) throw new RequestError(401, "Sign in to continue.");
       const current = await readSharing(tx, id, userId);
       if (current.version !== expectedVersion) throw new RequestError(409, "Sharing changed. Refresh before starting again.");
 
-      const [device] = await tx.select({ revokedAt: devices.revokedAt }).from(devices).where(ownedDevice(idOfDevice, userId));
+      const [device] = await tx.select({ revokedAt: devices.revokedAt }).from(devices).where(ownedDevice(requestedDeviceId, userId));
       if (!device) throw new RequestError(404, "Device not found.");
       if (device.revokedAt) throw new RequestError(409, "This device was revoked.");
 
@@ -123,7 +123,7 @@ export function createSharingRouter(db: Database) {
         await tx.delete(latestLocations).where(and(eq(latestLocations.circleId, id), eq(latestLocations.userId, userId)));
       }
       const [activeSession] = await tx.insert(trackingSessions).values({
-        id: randomUUID(), circleId: id, userId, deviceId: idOfDevice, startedAt: sql`clock_timestamp()`,
+        id: randomUUID(), circleId: id, userId, deviceId: requestedDeviceId, startedAt: sql`clock_timestamp()`,
       }).returning(sessionDetails);
       const version = randomUUID();
       await tx.update(memberships).set({ sharingVersion: version }).where(memberOf(id, userId));
