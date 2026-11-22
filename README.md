@@ -10,7 +10,7 @@ This workspace implements email and password accounts, private circles, and invi
 
 The web and native apps use the same Express API and PostgreSQL database. Better Auth manages credentials and revocable sessions. The web uses an HTTP-only cookie. The Expo client stores its session cookie in SecureStore. Invitation codes are stored as hashes. Circle access is checked against current membership, and membership alone does not enable location sharing.
 
-Family location sharing, histories, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
+The iOS app can opt into location capture and sync an encrypted outbox to the API. Family maps, history views, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
 
 ### Start the web app
 
@@ -35,6 +35,14 @@ Open [Kinlilo on this Mac](http://127.0.0.1:4310). Create two synthetic accounts
 ### Start the iOS app
 
 Keep the API running. On an iOS simulator the app uses `http://127.0.0.1:4311` by default. Run `pnpm --filter @kinlilo/mobile ios` for a local development build. A physical phone needs a reachable development API URL in `apps/mobile/.env`, a LAN-facing API bind, and a signed native build. The simulator setup does not require an App Store Connect app record.
+
+### Try the iOS location outbox
+
+Rebuild the native app to get SQLCipher. If an iOS project was generated before SQLCipher was enabled, run `pnpm --filter @kinlilo/mobile exec expo prebuild --platform ios --clean` to replace the generated directory before building. Configure an HTTPS API URL for sharing on a physical phone. Loopback HTTP works for local simulator tests.
+
+Sign in, open a circle, and select **Start location sharing**. Allow location access **Always** in iOS Settings. This iPhone can share to one circle at a time. Background callbacks save fixes in the encrypted queue. Bring Kinlilo to the foreground with its signed-in session to sync them. The queue retains up to 10,000 fixes from the last 48 hours.
+
+**Pause location sharing** stops local capture and discards queued fixes. **Pause pending** remains visible while the server is unreachable. Reopen Kinlilo with the same signed-in account and a connection to confirm the pause.
 
 ### Run the iOS location test
 
@@ -74,7 +82,7 @@ Override `KINLILO_TEST_DATABASE_URL` for different local credentials. Tests use 
 
 ## Location roadmap
 
-The mobile app will collect opted-in background locations and upload them to the shared API. The web and mobile apps will show time-stamped positions and trip and stop history. The first native location milestone will test locked phones, poor connectivity, and battery use on real iPhones. Family or circle administration will not override a member’s consent.
+The web and mobile apps will show time-stamped positions and trip and stop history. The first physical-device trial will test locked phones, poor connectivity, and battery use. Family or circle administration will not override a member’s consent.
 
 ## Costs and iOS distribution
 

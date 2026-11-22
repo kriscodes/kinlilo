@@ -12,15 +12,16 @@ export const registerDevice = z.object({
   label: z.string().trim().min(1).max(60),
 }).strict();
 export const startSharing = z.object({ deviceId, version: z.uuid() }).strict();
+export const locationEvent = z.object({
+  eventId: z.uuid(),
+  capturedAt: z.iso.datetime({ precision: 3 }),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracyM: z.number().nonnegative(),
+}).strict();
 export const locationBatch = z.object({
   sessionId: trackingSessionId,
-  events: z.array(z.object({
-    eventId: z.uuid(),
-    capturedAt: z.iso.datetime({ precision: 3 }),
-    latitude: z.number().min(-90).max(90),
-    longitude: z.number().min(-180).max(180),
-    accuracyM: z.number().nonnegative(),
-  }).strict()).min(1).max(100),
+  events: z.array(locationEvent).min(1).max(100),
 }).strict();
 
 export type CircleRole = "owner" | "member";
@@ -36,10 +37,15 @@ export type CircleInvite = { code: string; expiresAt: string };
 export type Device = { id: string; label: string; registeredAt: string; revokedAt: string | null };
 export type TrackingSession = { id: string; deviceId: string; startedAt: string };
 export type CircleSharing = { version: string; activeSession: TrackingSession | null };
+export type LocationEvent = z.infer<typeof locationEvent>;
 export type LocationBatchEventResult =
   | { eventId: string; status: "accepted" | "duplicate" }
   | { eventId: string; status: "rejected"; reason: "before_session" | "future_timestamp" | "event_conflict" };
 export type LocationBatchResult = { serverTime: string; results: LocationBatchEventResult[] };
+
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
 
 type RequestOptions = {
   baseUrl: string;
@@ -48,7 +54,7 @@ type RequestOptions = {
 };
 
 export function createCircleClient({ baseUrl, credentials, headers }: RequestOptions) {
-  async function request<T>(path: string, method = "GET", body?: object): Promise<T> {
+  async function request<T>(path: string, method = "GET", body?: object, signal?: AbortSignal): Promise<T> {
     const requestHeaders = new Headers(await headers?.());
     if (body) requestHeaders.set("Content-Type", "application/json");
     const response = await fetch(baseUrl + "/v1" + path, {
@@ -57,10 +63,11 @@ export function createCircleClient({ baseUrl, credentials, headers }: RequestOpt
       headers: requestHeaders,
       body: body ? JSON.stringify(body) : undefined,
       cache: "no-store",
+      signal,
     });
     const result = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(result?.error?.message ?? "Unable to connect to Kinlilo. Try again.");
+      throw new ApiError(response.status, result?.error?.message ?? "Unable to connect to Kinlilo. Try again.");
     }
     return result as T;
   }
@@ -83,9 +90,10 @@ export function createCircleClient({ baseUrl, credentials, headers }: RequestOpt
     startSharing: (id: string, input: z.input<typeof startSharing>) => request<CircleSharing>(
       "/circles/" + encodeURIComponent(id) + "/tracking-sessions", "POST", input,
     ),
-    pauseSharing: (id: string, sessionId: string) => request<CircleSharing>(
-      "/circles/" + encodeURIComponent(id) + "/tracking-sessions/" + encodeURIComponent(sessionId) + "/pause", "POST", {},
+    pauseSharing: (id: string, sessionId: string, signal?: AbortSignal) => request<CircleSharing>(
+      "/circles/" + encodeURIComponent(id) + "/tracking-sessions/" + encodeURIComponent(sessionId) + "/pause", "POST", {}, signal,
     ),
-    uploadLocationBatch: (input: z.input<typeof locationBatch>) => request<LocationBatchResult>("/location-batches", "POST", input),
+    uploadLocationBatch: (input: z.input<typeof locationBatch>, signal?: AbortSignal) =>
+      request<LocationBatchResult>("/location-batches", "POST", input, signal),
   };
 }

@@ -1,26 +1,16 @@
-import { expoClient } from "@better-auth/expo/client";
-import { createCircleClient, type Circle, type CircleDetails, type CircleInvite } from "@kinlilo/contracts";
-import { createAuthClient } from "better-auth/react";
+import type { Circle, CircleDetails, CircleInvite } from "@kinlilo/contracts";
 import * as Location from "expo-location";
-import * as SecureStore from "expo-secure-store";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, AppState, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   clearLocationDiagnostics, getLocationDiagnosticReport, getLocationHarnessStatus, locationHarnessEnabled,
   startLocationHarness, stopLocationHarness,
 } from "./locationHarness";
-
-const baseURL = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:4311";
-const auth = createAuthClient({
-  baseURL,
-  plugins: [expoClient({ scheme: "kinlilo", storagePrefix: "kinlilo", cookiePrefix: "kinlilo", storage: SecureStore })],
-});
-
-const api = createCircleClient({
-  baseUrl: baseURL,
-  credentials: "omit",
-  headers: async () => ({ Cookie: await auth.getCookie(), "X-Kinlilo-Client": "mobile" }),
-});
+import {
+  getSharingSnapshot, locationSharingAvailable, pauseBeforeSigningOut, pauseLocationSharing,
+  setSharingAccount, startLocationSharing, subscribeToSharing, watchLocationSharing,
+} from "./locationSharing";
+import { api, auth } from "./mobileApi";
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong. Try again.";
@@ -92,7 +82,11 @@ function SignIn() {
   </View>;
 }
 
-function CircleHome({ name }: { name: string }) {
+function CircleHome({ name, accountId, sharing }: {
+  name: string;
+  accountId: string;
+  sharing: ReturnType<typeof getSharingSnapshot>;
+}) {
   const [circles, setCircles] = useState<Circle[] | null>(null);
   const [selected, setSelected] = useState<CircleDetails | null>(null);
   const [invite, setInvite] = useState<CircleInvite | null>(null);
@@ -131,6 +125,7 @@ function CircleHome({ name }: { name: string }) {
   return <>
     <Text style={styles.muted}>{name}</Text>
     <Button title="Sign out" secondary disabled={busy} onPress={() => void run(async () => {
+      await pauseBeforeSigningOut(accountId);
       const result = await auth.signOut();
       if (result.error) throw new Error(result.error.message ?? "Could not sign out.");
     })} />
@@ -163,9 +158,15 @@ function CircleHome({ name }: { name: string }) {
         <Text style={styles.body}>{member.name}</Text>
         <Text style={styles.muted}>{member.role === "owner" ? "Owner" : "Member"}</Text>
       </View>)}
+      {locationSharingAvailable && !sharing.state && !sharing.error && <>
+        <Text style={styles.muted}>Share this iPhone’s location in this circle, including in the background.</Text>
+        <Button title="Start location sharing" disabled={busy}
+          onPress={() => void run(() => startLocationSharing(accountId, selected.id))} />
+      </>}
       {selected.role === "owner" ? <Button title="Create invitation code" disabled={busy}
         onPress={() => void run(async () => { setInvite(await api.invite(selected.id)); })} />
         : <Button title="Leave circle" secondary disabled={busy} onPress={() => void run(async () => {
+          if (locationSharingAvailable) await pauseLocationSharing({ accountId, circleId: selected.id });
           await api.leave(selected.id);
           setSelected(null);
           await refresh();
@@ -267,24 +268,67 @@ function LocationHarness() {
   </View>;
 }
 
-function AccountWorkspace() {
-  const session = auth.useSession();
+function AccountWorkspace({ session, sharing }: {
+  session: ReturnType<typeof auth.useSession>;
+  sharing: ReturnType<typeof getSharingSnapshot>;
+}) {
   if (session.isPending) return <ActivityIndicator accessibilityLabel="Loading Kinlilo" />;
   if (session.error) return <>
     <Text accessibilityRole="alert" style={styles.error}>Couldn’t connect to Kinlilo.</Text>
     <Button title="Try again" onPress={() => void session.refetch()} />
   </>;
-  return session.data ? <CircleHome name={session.data.user.name} key={session.data.user.id} /> : <SignIn />;
+  return session.data ? <CircleHome name={session.data.user.name} accountId={session.data.user.id}
+    sharing={sharing} key={session.data.user.id} /> : <SignIn />;
+}
+
+function LocalSharingStatus({ sharing, accountId }: {
+  sharing: ReturnType<typeof getSharingSnapshot>;
+  accountId: string | null | undefined;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { state } = sharing;
+  if (!state && !sharing.error) return null;
+
+  async function pause() {
+    setBusy(true);
+    setError("");
+    try { await pauseLocationSharing(); }
+    catch (failure) { setError(errorMessage(failure)); }
+    finally { setBusy(false); }
+  }
+
+  return <View style={styles.card}>
+    {state?.phase === "active" && <>
+      <Text accessibilityRole="header" style={styles.heading}>Location sharing is on</Text>
+      <Text style={styles.muted}>Queued fixes: {state.queued}</Text>
+      {state.dropped > 0 && <Text style={styles.muted}>Discarded fixes: {state.dropped}</Text>}
+      <Button title="Pause location sharing" disabled={busy} onPress={() => void pause()} />
+    </>}
+    {state?.phase === "pausing" && <>
+      <Text accessibilityRole="header" style={styles.heading}>Pause pending</Text>
+      <Text style={styles.muted}>{accountId === state.accountId
+        ? "Capture and uploads have stopped on this iPhone. Kinlilo will confirm the pause when it can reach the server."
+        : "Capture and uploads have stopped on this iPhone. Sign in with the account that started sharing to confirm the pause."}</Text>
+    </>}
+    {(error || sharing.error) && <Text accessibilityRole="alert" style={styles.error}>{error || sharing.error}</Text>}
+  </View>;
 }
 
 export default function App() {
   const [showHarness, setShowHarness] = useState(false);
+  const session = auth.useSession();
+  const accountId = session.error || session.isPending ? undefined : session.data?.user.id ?? null;
+  const sharing = useSyncExternalStore(subscribeToSharing, getSharingSnapshot);
+  useEffect(watchLocationSharing, []);
+  useEffect(() => { setSharingAccount(accountId); }, [accountId]);
   return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
     contentInsetAdjustmentBehavior="automatic">
     <Text accessibilityRole="header" style={styles.brand}>Kinlilo</Text>
     {locationHarnessEnabled && <Button title={showHarness ? "Back to Kinlilo" : "Open iOS location test"} secondary
       onPress={() => setShowHarness(!showHarness)} />}
-    {showHarness ? <LocationHarness /> : <AccountWorkspace />}
+    {locationSharingAvailable && <LocalSharingStatus sharing={sharing} accountId={accountId} />}
+    {showHarness ? <LocationHarness /> : <AccountWorkspace session={session} sharing={sharing} />}
   </ScrollView>;
 }
 

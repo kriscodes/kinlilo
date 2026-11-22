@@ -75,6 +75,9 @@ importers:
       expo-constants:
         specifier: ~55.0.17
         version: 55.0.17(@expo/dom-webview@55.0.6)(expo@55.0.32)(react-native@0.83.10(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.0)(supports-color@8.1.1))(react@19.2.0)(supports-color@8.1.1)
+      expo-crypto:
+        specifier: ~55.0.19
+        version: 55.0.19(@expo/dom-webview@55.0.6)(expo@55.0.32)(react-native@0.83.10(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.0)(supports-color@8.1.1))(react@19.2.0)
       expo-linking:
         specifier: ~55.0.17
         version: 55.0.17(@expo/dom-webview@55.0.6)(expo@55.0.32)(react-native@0.83.10(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.0)(supports-color@8.1.1))(react@19.2.0)(supports-color@8.1.1)
@@ -2156,6 +2159,11 @@ packages:
     peerDependencies:
       expo: '*'
       react-native: '*'
+
+  expo-crypto@55.0.19:
+    resolution: {integrity: sha512-Ip1jQ5GphvrC4Ls5osAmIapi+JZXOqRJYaaMxTFWpkhssNUq88oP45pWGv2uU2K/Ci6j7iLDJzU8eN3v+B7jrA==}
+    peerDependencies:
+      expo: '*'
 
   expo-file-system@55.0.26:
     resolution: {integrity: sha512-KBOQWqxumCxJBN29Lu13QpccwAhcjsgDYCJSVVjfGydaK/UbEkH/1rT/WZmdfoZ4G8mUJlfRbWfnJtfHUXxsdw==}
@@ -6029,6 +6037,14 @@ snapshots:
       - '@expo/dom-webview'
       - react
       - supports-color
+
+  expo-crypto@55.0.19(@expo/dom-webview@55.0.6)(expo@55.0.32)(react-native@0.83.10(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.0)(supports-color@8.1.1))(react@19.2.0):
+    dependencies:
+      expo: 55.0.32(@babel/core@7.29.13(supports-color@8.1.1))(@expo/dom-webview@55.0.6)(react-native@0.83.10(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.0)(supports-color@8.1.1))(react@19.2.0)(supports-color@8.1.1)(typescript@5.9.3)
+    transitivePeerDependencies:
+      - '@expo/dom-webview'
+      - react
+      - react-native
 
   expo-file-system@55.0.26(@expo/dom-webview@55.0.6)(expo@55.0.32)(react-dom@19.2.8(react@19.2.8))(react-native@0.83.10(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.8)(supports-color@8.1.1))(react@19.2.8):
     dependencies:

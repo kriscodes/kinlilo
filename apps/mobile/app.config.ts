@@ -1,16 +1,19 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 export default ({ config }: ConfigContext): Partial<ExpoConfig> => {
-  if (process.env.EXPO_PUBLIC_KINLILO_LOCATION_HARNESS !== "1") return config;
+  const harness = process.env.EXPO_PUBLIC_KINLILO_LOCATION_HARNESS === "1";
 
   return {
     ...config,
     plugins: [
       ...(config.plugins ?? []),
+      ["expo-sqlite", { ios: { useSQLCipher: true } }],
       ["expo-location", {
         isIosBackgroundLocationEnabled: true,
-        locationWhenInUsePermission: "Allow Kinlilo to measure location callback timing in the iOS test harness.",
-        locationAlwaysAndWhenInUsePermission: "Allow Kinlilo to measure background location callback timing during the iOS test.",
+        locationWhenInUsePermission: harness
+          ? "Allow Kinlilo to use your location for circle sharing or the iOS test harness."
+          : "Allow Kinlilo to collect your location when you turn on circle sharing.",
+        locationAlwaysAndWhenInUsePermission: "Allow Kinlilo to collect location in the background while you have sharing turned on.",
       }],
     ],
   };
