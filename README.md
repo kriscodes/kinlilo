@@ -10,7 +10,7 @@ This workspace implements email and password accounts, private circles, and invi
 
 The web and native apps use the same Express API and PostgreSQL database. Better Auth manages credentials and revocable sessions. The web uses an HTTP-only cookie. The Expo client stores its session cookie in SecureStore. Invitation codes are stored as hashes. Circle access is checked against current membership, and membership alone does not enable location sharing.
 
-Location capture, histories, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
+Family location sharing, histories, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
 
 ### Start the web app
 
@@ -35,6 +35,18 @@ Open [Kinlilo on this Mac](http://127.0.0.1:4310). Create two synthetic accounts
 ### Start the iOS app
 
 Keep the API running. On an iOS simulator the app uses `http://127.0.0.1:4311` by default. Run `pnpm --filter @kinlilo/mobile ios` for a local development build. A physical phone needs a reachable development API URL in `apps/mobile/.env`, a LAN-facing API bind, and a signed native build. The simulator setup does not require an App Store Connect app record.
+
+### Run the iOS location test
+
+Use a native iOS build with the harness explicitly enabled. The test screen works independently of sign-in and the API. From a checkout with no generated `apps/mobile/ios` directory, run:
+
+```sh
+EXPO_PUBLIC_KINLILO_LOCATION_HARNESS=1 pnpm --filter @kinlilo/mobile ios
+```
+
+If you already generated an iOS project, regenerate it with `EXPO_PUBLIC_KINLILO_LOCATION_HARNESS=1 pnpm --filter @kinlilo/mobile exec expo prebuild --platform ios --clean`. This replaces the generated iOS directory. For an offline physical-device trial, use the same flag with `pnpm --filter @kinlilo/mobile ios --device --configuration Release` to embed the JavaScript bundle. Regenerate the native project without the flag before making an ordinary build.
+
+Select **Open iOS location test**, request **When In Use** then **Always**, and select **Start test**. If iOS keeps the permission at While Using, open iOS Settings and select Always there. Walk with the phone, then try it backgrounded or locked. Reopen the test to see the callback count and the latest probe results. **Share diagnostic report** exports up to 1,000 queued callbacks with capture and callback times, app state, and results from two synthetic Keychain items. Test records stay on the phone until shared explicitly. The harness stores no coordinates and sends no uploads. Select **Stop test** to end capture, then **Clear diagnostics** when you want to discard the report.
 
 ### Check the workspace
 

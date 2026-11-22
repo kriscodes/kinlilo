@@ -1,9 +1,14 @@
 import { expoClient } from "@better-auth/expo/client";
 import { createCircleClient, type Circle, type CircleDetails, type CircleInvite } from "@kinlilo/contracts";
 import { createAuthClient } from "better-auth/react";
+import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  clearLocationDiagnostics, getLocationDiagnosticReport, getLocationHarnessStatus, locationHarnessEnabled,
+  startLocationHarness, stopLocationHarness,
+} from "./locationHarness";
 
 const baseURL = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:4311";
 const auth = createAuthClient({
@@ -177,17 +182,109 @@ function CircleHome({ name }: { name: string }) {
   </>;
 }
 
-export default function App() {
+function LocationHarness() {
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof getLocationHarnessStatus>>>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const actionInProgress = useRef(false);
+
+  useEffect(() => {
+    let mounted = true;
+    async function refresh() {
+      try {
+        const next = await getLocationHarnessStatus();
+        if (mounted && !actionInProgress.current) setStatus(next);
+      } catch {
+        if (mounted && !actionInProgress.current) setError("Could not read the location test status.");
+      }
+    }
+    void refresh();
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") void refresh();
+    });
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  async function run(action?: () => Promise<unknown>) {
+    if (actionInProgress.current) return;
+    actionInProgress.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await action?.();
+    } catch (failure) {
+      setError(errorMessage(failure));
+    }
+    try {
+      setStatus(await getLocationHarnessStatus());
+    } catch {
+      setError(previous => previous || "Could not read the location test status.");
+    } finally {
+      actionInProgress.current = false;
+      setBusy(false);
+    }
+  }
+
+  const testEnabled = status !== undefined && status.startedAt !== null;
+  const testActive = testEnabled || status?.registered;
+  const latest = status?.latest;
+  const sampleCount = latest?.sample_count ?? 0;
+  const sampleLabel = sampleCount === 1 ? "1 location sample" : `${sampleCount} location samples`;
+  return <View style={styles.card}>
+    <Text accessibilityRole="header" style={styles.heading}>iOS location test</Text>
+    <Text style={styles.body}>Start the test to measure location callbacks while the app is open, backgrounded, or the phone is locked. The test saves timing and synthetic Keychain probe results on this device. Use Stop test to turn capture off.</Text>
+    {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+    {status ? <>
+      <Text style={styles.label}>{testEnabled ? "Capture enabled" : "Capture off"} · {status.registered ? "iOS task registered" : "iOS task unregistered"}</Text>
+      <Text style={styles.muted}>When In Use: {status.foreground.status} · Always: {status.background.status}</Text>
+      {status.foreground.granted && status.foreground.ios?.accuracy &&
+        <Text style={styles.muted}>Location accuracy authorization: {status.foreground.ios.accuracy}</Text>}
+      {!status.foreground.granted && <Button title="Request When In Use" secondary disabled={busy || !status.foreground.canAskAgain}
+        onPress={() => void run(Location.requestForegroundPermissionsAsync)} />}
+      {status.foreground.granted && !status.background.granted && <Button title="Request Always" secondary disabled={busy || !status.background.canAskAgain}
+        onPress={() => void run(Location.requestBackgroundPermissionsAsync)} />}
+      {testActive ? <Button title="Stop test" disabled={busy} onPress={() => void run(stopLocationHarness)} />
+        : <Button title="Start test" disabled={busy || !status.foreground.granted || !status.background.granted}
+          onPress={() => void run(startLocationHarness)} />}
+      <Text style={styles.label}>Queued callbacks: {status.queued}</Text>
+      {latest && <>
+        <Text style={styles.body}>Latest callback {new Date(latest.received_at).toLocaleString()} · {latest.app_state}</Text>
+        <Text style={styles.muted}>{latest.task_error ? "iOS reported a location task error." : sampleLabel}</Text>
+        <Text style={styles.muted}>After first unlock: {latest.after_first_unlock} · While unlocked: {latest.while_unlocked}</Text>
+      </>}
+      {status.queued > 0 && <>
+        <Button title="Share diagnostic report" secondary disabled={busy}
+          onPress={() => void run(async () => { await Share.share({ message: await getLocationDiagnosticReport() }); })} />
+        <Button title="Clear diagnostics" secondary disabled={busy || testActive}
+          onPress={() => void run(clearLocationDiagnostics)} />
+      </>}
+    </> : !error && <ActivityIndicator accessibilityLabel="Loading test status" />}
+    <Button title="Refresh status" secondary disabled={busy} onPress={() => void run()} />
+    <Button title="Open iOS Settings" secondary disabled={busy} onPress={() => void run(Linking.openSettings)} />
+  </View>;
+}
+
+function AccountWorkspace() {
   const session = auth.useSession();
+  if (session.isPending) return <ActivityIndicator accessibilityLabel="Loading Kinlilo" />;
+  if (session.error) return <>
+    <Text accessibilityRole="alert" style={styles.error}>Couldn’t connect to Kinlilo.</Text>
+    <Button title="Try again" onPress={() => void session.refetch()} />
+  </>;
+  return session.data ? <CircleHome name={session.data.user.name} key={session.data.user.id} /> : <SignIn />;
+}
+
+export default function App() {
+  const [showHarness, setShowHarness] = useState(false);
   return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
     contentInsetAdjustmentBehavior="automatic">
     <Text accessibilityRole="header" style={styles.brand}>Kinlilo</Text>
-    {session.isPending ? <ActivityIndicator accessibilityLabel="Loading Kinlilo" />
-      : session.error ? <>
-        <Text accessibilityRole="alert" style={styles.error}>Couldn’t connect to Kinlilo.</Text>
-        <Button title="Try again" onPress={() => void session.refetch()} />
-      </>
-      : session.data ? <CircleHome name={session.data.user.name} key={session.data.user.id} /> : <SignIn />}
+    {locationHarnessEnabled && <Button title={showHarness ? "Back to Kinlilo" : "Open iOS location test"} secondary
+      onPress={() => setShowHarness(!showHarness)} />}
+    {showHarness ? <LocationHarness /> : <AccountWorkspace />}
   </ScrollView>;
 }
 
