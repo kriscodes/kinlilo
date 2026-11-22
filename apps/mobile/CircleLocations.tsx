@@ -1,69 +1,30 @@
 import {
-  ApiError, createLocationPoller, describeFix, fixColors, hasLocationFix, locationBounds, locationStatusLabel,
-  type CircleDetails, type CircleLocations as LocationResponse, type MappedMember,
+  describeFix, fixColors, hasLocationFix, latestLocationMarkers, locationStatusLabel, type CircleDetails,
 } from "@kinlilo/contracts";
-import * as Network from "expo-network";
-import { useEffect, useRef, useState } from "react";
-import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
-import MapView, { Marker, type Region } from "react-native-maps";
+import { useCallback, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import CircleHistory from "./CircleHistory";
+import CircleMap from "./CircleMap";
 import { api } from "./mobileApi";
+import { useLocationQuery } from "./useLocationQuery";
 
-function regionFor(members: MappedMember[]): Region {
-  const { west, east, south, north } = locationBounds(members);
-  return {
-    latitude: Math.max(-89, Math.min(89, (south + north) / 2)),
-    longitude: ((west + east) / 2 + 540) % 360 - 180,
-    latitudeDelta: Math.min(179, Math.max(.02, (north - south) * 1.5)),
-    longitudeDelta: Math.min(359, Math.max(.02, (east - west) * 1.5)),
-  };
-}
-
-function CircleMap({ members }: { members: MappedMember[] }) {
-  const map = useRef<MapView>(null);
+export default function CircleLocations({ circle, viewerId }: { circle: CircleDetails; viewerId: string }) {
+  const [view, setView] = useState<"Latest" | "History">("Latest");
   return <>
-    <MapView ref={map} initialRegion={regionFor(members)} style={styles.map} userInterfaceStyle="light"
-      accessibilityLabel="Map of last reported locations">
-      {members.map(member => <Marker key={member.id} title={member.name} pinColor={fixColors[member.status]}
-        coordinate={{ latitude: member.fix.latitude, longitude: member.fix.longitude }}
-        description={`${locationStatusLabel[member.status]} · ${describeFix(member.fix)}`} />)}
-    </MapView>
-    <Pressable accessibilityRole="button" style={styles.fit} onPress={() => map.current?.animateToRegion(regionFor(members), 250)}>
-      <Text style={styles.fitText}>Fit locations</Text>
-    </Pressable>
+    <View style={styles.viewButtons}>
+      {(["Latest", "History"] as const).map(option => <Pressable key={option} accessibilityRole="button"
+        accessibilityState={{ selected: view === option }}
+        style={[styles.viewButton, view === option && styles.selected]} onPress={() => setView(option)}>
+        <Text style={[styles.viewButtonText, view === option && styles.selectedText]}>{option}</Text>
+      </Pressable>)}
+    </View>
+    {view === "Latest" ? <LatestLocations circle={circle} /> : <CircleHistory circle={circle} viewerId={viewerId} />}
   </>;
 }
 
-export default function CircleLocations({ circle }: { circle: CircleDetails }) {
-  const [locations, setLocations] = useState<LocationResponse | null>(null);
-  const [error, setError] = useState("");
-  const [accessLost, setAccessLost] = useState(false);
-
-  useEffect(() => {
-    const poller = createLocationPoller(signal => api.getLocations(circle.id, signal), result => {
-      setLocations(result);
-      setAccessLost(false);
-      setError("");
-    }, failure => {
-      const hidden = failure instanceof ApiError && (failure.status === 401 || failure.status === 404);
-      setLocations(null);
-      setAccessLost(hidden);
-      setError(hidden ? "This circle’s locations are no longer available to you." : "Could not refresh locations.");
-    });
-    const appState = AppState.addEventListener("change", state => {
-      if (state === "active") poller.refresh();
-      else { poller.stop(); setLocations(null); }
-    });
-    const network = Network.addNetworkStateListener(state => {
-      if (state.isConnected && AppState.currentState === "active") poller.refresh();
-      if (state.isConnected === false) {
-        poller.stop();
-        setLocations(null);
-        setError("You’re offline. Reconnect to see locations.");
-      }
-    });
-    if (AppState.currentState === "active") poller.refresh();
-    return () => { poller.stop(); appState.remove(); network.remove(); };
-  }, [circle.id]);
+function LatestLocations({ circle }: { circle: CircleDetails }) {
+  const load = useCallback((signal: AbortSignal) => api.getLocations(circle.id, signal), [circle.id]);
+  const { data: locations, error, accessLost } = useLocationQuery(load);
 
   const members = locations?.members ?? circle.members.map(member => ({ ...member, status: null, fix: null }));
   const mapped = locations?.members.filter(hasLocationFix) ?? [];
@@ -71,7 +32,7 @@ export default function CircleLocations({ circle }: { circle: CircleDetails }) {
     <Text accessibilityRole="header" style={styles.label}>Last reported locations</Text>
     {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     {!error && !locations && <Text style={styles.muted}>Loading locations…</Text>}
-    {mapped.length > 0 && <CircleMap members={mapped} />}
+    {mapped.length > 0 && <CircleMap markers={latestLocationMarkers(mapped)} />}
     {locations && !mapped.length && <Text style={styles.muted}>No locations are visible for this circle.</Text>}
     {!accessLost && <>
       <Text accessibilityRole="header" style={styles.label}>Members · {members.length}</Text>
@@ -96,9 +57,11 @@ const styles = StyleSheet.create({
   label: { color: "#251934", fontSize: 15, fontWeight: "600", flexShrink: 1 },
   muted: { color: "#62536e", fontSize: 14 },
   error: { color: "#862e47", backgroundColor: "#faeaf0", borderRadius: 9, padding: 10 },
-  map: { height: 248, borderRadius: 12 },
-  fit: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, borderRadius: 9, paddingHorizontal: 12, backgroundColor: "#f0eaf7" },
-  fitText: { color: "#563b72", fontSize: 14, fontWeight: "600" },
+  viewButtons: { flexDirection: "row", gap: 8 },
+  viewButton: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 44, borderRadius: 9, backgroundColor: "#f0eaf7" },
+  viewButtonText: { color: "#563b72", fontSize: 15, fontWeight: "600" },
+  selected: { backgroundColor: "#563b72" },
+  selectedText: { color: "#fff" },
   member: { gap: 4, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: "#e0d5eb" },
   memberTitle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   status: { color: "#62536e", fontSize: 14, fontWeight: "600" },

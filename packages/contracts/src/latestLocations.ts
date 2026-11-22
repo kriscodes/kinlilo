@@ -20,9 +20,9 @@ export type MappedMember = Extract<MemberLocation, { fix: LocationFix }>;
 
 export const locationPollIntervalMs = 15_000;
 
-export function createLocationPoller(
-  load: (signal: AbortSignal) => Promise<CircleLocations>,
-  onLocations: (locations: CircleLocations) => void,
+export function createLocationPoller<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  onLocations: (locations: T) => void,
   onError: (error: unknown) => void,
 ) {
   let request: AbortController | undefined;
@@ -86,7 +86,15 @@ export function describeFix(fix: LocationFix) {
   return `Captured ${new Date(fix.capturedAt).toLocaleString()} · Accuracy ±${Math.ceil(fix.accuracyM)} m`;
 }
 
-export function locationBounds(members: readonly MappedMember[]) {
+export type LocationMarker = { id: string; title: string; detail: string; color: string; fix: LocationFix };
+
+export function latestLocationMarkers(members: readonly MappedMember[]): LocationMarker[] {
+  return members.map(({ id, name, status, fix }) => ({
+    id, title: name, detail: `${locationStatusLabel[status]} · ${describeFix(fix)}`, color: fixColors[status], fix,
+  }));
+}
+
+export function locationBounds(members: readonly { fix: LocationFix }[]) {
   const longitudes = members.map(member => member.fix.longitude).sort((a, b) => a - b);
   const latitudes = members.map(member => member.fix.latitude);
   let west = longitudes[0];

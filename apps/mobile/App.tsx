@@ -154,7 +154,7 @@ function CircleHome({ name, accountId, sharing }: {
     </View>
     {selected && <View style={styles.card}>
       <Text accessibilityRole="header" style={styles.heading}>{selected.name}</Text>
-      {Platform.OS === "ios" ? <CircleLocations key={selected.id} circle={selected} /> : <>
+      {Platform.OS === "ios" ? <CircleLocations key={selected.id} circle={selected} viewerId={accountId} /> : <>
         <Text style={styles.label}>Members · {selected.memberCount}</Text>
         {selected.members.map(member => <View key={member.id} style={styles.member}>
           <Text style={styles.body}>{member.name}</Text>

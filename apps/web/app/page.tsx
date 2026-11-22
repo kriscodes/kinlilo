@@ -85,7 +85,7 @@ function MiniForm({ label, button, maxLength, busy, onSubmit }: {
   </form>;
 }
 
-function CircleWorkspace({ name }: { name: string }) {
+function CircleWorkspace({ name, viewerId }: { name: string; viewerId: string }) {
   const [circles, setCircles] = useState<Circle[] | null>(null);
   const [detailsById, setDetailsById] = useState<CircleDetails | null>(null);
   const [selectedId, setSelectedId] = useState("");
@@ -146,7 +146,7 @@ function CircleWorkspace({ name }: { name: string }) {
     if (!details) return <p className="muted">{error ? "Could not load this circle." : "Loading members…"}</p>;
     return <>
       <div className="section-header"><h2>{details.name}</h2><span className="chip">{details.role === "owner" ? "Owner" : "Member"}</span></div>
-      <CircleLocations key={details.id} circle={details} load={api.getLocations} />
+      <CircleLocations key={details.id} circle={details} viewerId={viewerId} api={api} />
       {details.role === "owner"
         ? <button disabled={busy} onClick={() => void perform(async () => {
             const result = await api.invite(details.id);
@@ -214,5 +214,5 @@ export default function Page() {
     <button onClick={() => void refetch()}>Try again</button>
   </section></main>;
   if (!data) return <AuthForm />;
-  return <CircleWorkspace key={data.user.id} name={data.user.name} />;
+  return <CircleWorkspace key={data.user.id} name={data.user.name} viewerId={data.user.id} />;
 }

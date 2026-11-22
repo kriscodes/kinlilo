@@ -50,6 +50,12 @@ Open a circle on web or iOS. The map and member list update while the circle is 
 
 The web basemap uses bundled [Natural Earth land geometry](https://www.naturalearthdata.com/about/terms-of-use/). For street detail, set `NEXT_PUBLIC_KINLILO_MAP_STYLE_URL` in the root `.env` to an approved HTTPS MapLibre style and rebuild the web app. A configured tile provider receives viewport-based map requests from the browser.
 
+### View location history
+
+Open a circle, choose **History**, then select a member and a date in your local time zone. The map and timeline show reported fixes, their capture times and accuracy, and gaps between reports. Use the earlier and later controls to browse dates with many reports.
+
+You can see your own retained history while sharing is paused. Other members’ history is available while they share with the circle, starting when you joined. The API serves up to 30 days of history by default. Set `KINLILO_LOCATION_RETENTION_DAYS` to change that window.
+
 ### Run the iOS location test
 
 Use a native iOS build with the harness explicitly enabled. The test screen works independently of sign-in and the API. From a checkout with no generated `apps/mobile/ios` directory, run:
@@ -88,7 +94,7 @@ Override `KINLILO_TEST_DATABASE_URL` for different local credentials. Tests use 
 
 ## Location roadmap
 
-The web and mobile apps will add trip and stop history. The first physical-device trial will test locked phones, poor connectivity, and battery use. Family or circle administration will not override a member’s consent.
+The first physical-device trial will test locked phones, poor connectivity, and battery use. Family or circle administration will not override a member’s consent.
 
 ## Costs and iOS distribution
 

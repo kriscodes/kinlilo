@@ -5,12 +5,13 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { RequestError } from "./circles";
 import { authUsers, devices, latestLocations, locationPoints, lockAccount, memberships, trackingSessions, type Database } from "./db";
+import { locationRetentionCutoff } from "./locationHistory";
 
 type Locals = { userId: string };
 type NewPoint = typeof locationPoints.$inferInsert;
 const maximumClockSkewMs = 2 * 60 * 1_000;
 
-export function createLocationsRouter(db: Database) {
+export function createLocationsRouter(db: Database, retentionDays: number) {
   const router = Router();
 
   router.get<{ id: string }, CircleLocations, unknown, unknown, Locals>("/circles/:id/locations", async (req, res) => {
@@ -42,6 +43,7 @@ export function createLocationsRouter(db: Database) {
       .leftJoin(locationPoints, and(
         eq(locationPoints.id, latestLocations.pointId), eq(locationPoints.sessionId, trackingSessions.id),
         isNotNull(devices.id), gte(locationPoints.capturedAt, viewer.joinedAt),
+        gte(locationPoints.capturedAt, locationRetentionCutoff(retentionDays)),
       ))
       .where(eq(memberships.circleId, id.data)).orderBy(asc(authUsers.name), asc(authUsers.id));
     if (!members.length) throw new RequestError(404, "Circle not found.");

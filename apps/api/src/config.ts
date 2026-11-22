@@ -6,6 +6,7 @@ const env = z.object({
   KINLILO_API_URL: z.url({ protocol: /^https?$/ }).default("http://127.0.0.1:4311"),
   KINLILO_WEB_URL: z.url({ protocol: /^https?$/ }).default("http://127.0.0.1:4310"),
   KINLILO_API_HOST: z.string().default("127.0.0.1"),
+  KINLILO_LOCATION_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 });
 
 export function readConfig() {
@@ -22,6 +23,7 @@ export function readConfig() {
     host: values.KINLILO_API_HOST,
     port: Number(process.env.KINLILO_API_PORT ?? (new URL(values.KINLILO_API_URL).port || 4311)),
     production: process.env.NODE_ENV === "production",
+    locationRetentionDays: values.KINLILO_LOCATION_RETENTION_DAYS,
   };
 }
 

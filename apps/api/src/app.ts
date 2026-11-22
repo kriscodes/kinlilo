@@ -6,6 +6,7 @@ import { createAuth } from "./auth";
 import { createCirclesRouter, RequestError } from "./circles";
 import type { Config } from "./config";
 import { connectDatabase } from "./db";
+import { createLocationHistoryRouter } from "./locationHistory";
 import { createLocationsRouter } from "./locations";
 import { createSharingRouter } from "./sharing";
 
@@ -60,7 +61,8 @@ export function createApp(config: Config) {
   }));
   app.use("/v1/circles", createCirclesRouter(db));
   app.use("/v1", createSharingRouter(db));
-  app.use("/v1", createLocationsRouter(db));
+  app.use("/v1", createLocationsRouter(db, config.locationRetentionDays));
+  app.use("/v1", createLocationHistoryRouter(db, config.locationRetentionDays));
   app.use((_req, _res, next) => next(new RequestError(404, "Page not found.")));
 
   const handleError: ErrorRequestHandler = (error, _req, res, _next) => {

@@ -1,7 +1,7 @@
 "use client";
 
-import { describeFix, fixColors, locationBounds, locationStatusLabel, type MappedMember } from "@kinlilo/contracts";
-import { Map as MapLibreMap, Marker, NavigationControl, Popup, setWorkerUrl, type StyleSpecification } from "maplibre-gl";
+import { locationBounds, type LocationFix, type LocationMarker } from "@kinlilo/contracts";
+import { Map as MapLibreMap, Marker, NavigationControl, Popup, setWorkerUrl, type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 
@@ -15,18 +15,21 @@ const localStyle: StyleSpecification = {
 };
 const style = process.env.NEXT_PUBLIC_KINLILO_MAP_STYLE_URL || localStyle;
 
-function fitLocations(map: MapLibreMap, members: MappedMember[], duration: number) {
-  const { west, east, south, north } = locationBounds(members);
+function fitLocations(map: MapLibreMap, markers: LocationMarker[], maxZoom: number, duration: number) {
+  const { west, east, south, north } = locationBounds(markers);
   const clamp = (latitude: number) => Math.min(85.05, Math.max(-85.05, latitude));
-  map.fitBounds([[west, clamp(south)], [east, clamp(north)]], { padding: 42, maxZoom: typeof style === "string" ? 14 : 6, duration });
+  map.fitBounds([[west, clamp(south)], [east, clamp(north)]], { padding: 42, maxZoom, duration });
 }
 
-export default function CircleMap({ members }: { members: MappedMember[] }) {
+export default function CircleMap({ markers, paths, label = "Map of last reported locations" }: {
+  markers: LocationMarker[]; paths?: LocationFix[][]; label?: string;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
-  const markers = useRef(new Map<string, { marker: Marker; element: HTMLButtonElement; popup: Popup }>());
+  const livePins = useRef(new Map<string, { marker: Marker; element: HTMLButtonElement; popup: Popup }>());
   const fitted = useRef(false);
   const [failed, setFailed] = useState(false);
+  const maxZoom = paths || typeof style === "string" ? 14 : 6;
 
   useEffect(() => {
     if (!container.current) return;
@@ -41,7 +44,7 @@ export default function CircleMap({ members }: { members: MappedMember[] }) {
     }
     map.current = instance;
     instance.once("error", () => setFailed(true));
-    const pins = markers.current;
+    const pins = livePins.current;
     return () => {
       fitted.current = false;
       map.current = null;
@@ -53,41 +56,65 @@ export default function CircleMap({ members }: { members: MappedMember[] }) {
 
   useEffect(() => {
     const instance = map.current;
-    if (!instance || failed || !members.length) return;
-    const pins = markers.current;
-    const visibleIds = new Set(members.map(member => member.id));
+    if (!instance || failed || !markers.length) return;
+    const pins = livePins.current;
+    const visibleIds = new Set(markers.map(marker => marker.id));
     for (const [id, { marker }] of pins) {
       if (visibleIds.has(id)) continue;
       marker.remove();
       pins.delete(id);
     }
-    for (const member of members) {
-      const coordinates: [number, number] = [member.fix.longitude, member.fix.latitude];
-      let pin = pins.get(member.id);
+    for (const marker of markers) {
+      const coordinates: [number, number] = [marker.fix.longitude, marker.fix.latitude];
+      let pin = pins.get(marker.id);
       if (!pin) {
         const element = document.createElement("button");
         element.type = "button";
         element.className = "location-map-marker";
         const popup = new Popup({ offset: 12, maxWidth: "210px" });
-        const marker = new Marker({ element }).setLngLat(coordinates).setPopup(popup).addTo(instance);
-        pin = { marker, element, popup };
-        pins.set(member.id, pin);
+        pin = { marker: new Marker({ element }).setLngLat(coordinates).setPopup(popup).addTo(instance), element, popup };
+        pins.set(marker.id, pin);
       }
-      const label = `${member.name} · ${locationStatusLabel[member.status]} · ${describeFix(member.fix)}`;
+      const label = `${marker.title} · ${marker.detail}`;
       pin.marker.setLngLat(coordinates);
       pin.element.setAttribute("aria-label", label);
-      pin.element.style.setProperty("--pin-color", fixColors[member.status]);
+      pin.element.style.setProperty("--pin-color", marker.color);
       pin.popup.setText(label);
     }
     if (!fitted.current) {
-      fitLocations(instance, members, 0);
+      fitLocations(instance, markers, maxZoom, 0);
       fitted.current = true;
     }
-  }, [members, failed]);
+  }, [markers, maxZoom, failed]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || failed || !paths) return;
+    const data = {
+      type: "FeatureCollection" as const,
+      features: paths.map(path => ({
+        type: "Feature" as const, properties: {},
+        geometry: { type: "LineString" as const, coordinates: path.map(fix => [fix.longitude, fix.latitude]) },
+      })),
+    };
+    const sourceId = "kinlilo-history-paths";
+    function draw() {
+      if (!instance) return;
+      const source = instance.getSource<GeoJSONSource>(sourceId);
+      if (source) { source.setData(data); return; }
+      instance.addSource(sourceId, { type: "geojson", data });
+      instance.addLayer({ id: sourceId, type: "line", source: sourceId, paint: {
+        "line-color": "#563b72", "line-width": 3, "line-dasharray": [2, 2],
+      } });
+    }
+    if (instance.getSource(sourceId) || instance.isStyleLoaded()) draw();
+    else instance.once("load", draw);
+    return () => { instance.off("load", draw); };
+  }, [paths, failed]);
 
   return <>
-    <div ref={container} className="circle-map" aria-label="Map of last reported locations" hidden={failed} />
+    <div ref={container} className="circle-map" aria-label={label} hidden={failed} />
     {failed ? <p className="muted">Map unavailable. Location details are listed below.</p>
-      : <button type="button" className="outline fit-locations" onClick={() => { if (map.current) fitLocations(map.current, members, 250); }}>Fit locations</button>}
+      : <button type="button" className="outline fit-locations" onClick={() => { if (map.current) fitLocations(map.current, markers, maxZoom, 250); }}>Fit locations</button>}
   </>;
 }

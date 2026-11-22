@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { CircleLocations } from "./latestLocations";
+import type { HistoryQuery, LocationHistory } from "./locationHistory";
 
 export * from "./latestLocations";
+export * from "./locationHistory";
 
 export const circleId = z.uuid();
 export const createCircle = z.object({ name: z.string().trim().min(1).max(60) }).strict();
@@ -80,6 +82,12 @@ export function createCircleClient({ baseUrl, credentials, headers }: RequestOpt
     get: (id: string) => request<CircleDetails>("/circles/" + encodeURIComponent(id)),
     getLocations: (id: string, signal?: AbortSignal) =>
       request<CircleLocations>("/circles/" + encodeURIComponent(id) + "/locations", "GET", undefined, signal),
+    getLocationHistory: (circle: string, member: string, query: HistoryQuery, signal?: AbortSignal) => {
+      const parameters = new URLSearchParams({ from: query.from, to: query.to });
+      if (query.cursor) parameters.set("cursor", query.cursor);
+      const path = `/circles/${encodeURIComponent(circle)}/members/${encodeURIComponent(member)}/history?${parameters}`;
+      return request<LocationHistory>(path, "GET", undefined, signal);
+    },
     create: (name: string) => request<Circle>("/circles", "POST", { name }),
     invite: (id: string) => request<CircleInvite>(
       "/circles/" + encodeURIComponent(id) + "/invites", "POST", {},

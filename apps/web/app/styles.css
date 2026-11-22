@@ -68,3 +68,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
 .location-status { color: var(--muted); font-size: .85rem; font-weight: 700; }
 .location-status[data-status="recent"] { color: var(--action); }
 .location-status[data-status="delayed"] { color: #805218; }
+.location-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.location-view-buttons { margin-top: 16px; }
+.location-view-buttons [aria-pressed="true"] { background: var(--action); color: white; }
+.history-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr)); gap: 12px; margin: 12px 0 16px; }
+.history-filters select { font: inherit; color: var(--ink); border: 1px solid #b8a9c6; border-radius: 10px; background: white; min-width: 0; padding: 10px 12px; }
+.history-timeline { margin-top: 8px; }
+.history-timeline li { display: grid; gap: 4px; }
+.history-gap { padding: 4px 0; color: #805218; font-size: .85rem; }

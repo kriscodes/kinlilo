@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { CircleSharing, Device, LocationBatchResult, TrackingSession } from "@kinlilo/contracts";
+import type { CircleSharing, Device, LocationBatchResult, LocationHistory, TrackingSession } from "@kinlilo/contracts";
 import { once } from "node:events";
 import { randomUUID, createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
@@ -13,7 +13,7 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
       testDatabase.pathname !== "/kinlilo_test" || testDatabase.search || testDatabase.hash) {
     throw new Error("Integration tests require an isolated loopback kinlilo_test database.");
   }
-  const config = { ...readConfig(), databaseUrl: testDatabase.toString() };
+  const config = { ...readConfig(), databaseUrl: testDatabase.toString(), locationRetentionDays: 30 };
   const { app, pool } = createApp(config);
   const server = app.listen(0, "127.0.0.1");
   t.after(async () => {
@@ -370,6 +370,78 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
       assert.equal(latestOwner.status, status);
       assert.equal(latestOwner.fix.capturedAt, capturedAt);
     }
+  });
+
+  await t.test("location history filters by date and rechecks sharing on each page", async () => {
+    const circleId = create.body.id as string;
+    const memberId = owner.body.user.id as string;
+    const historyPath = `${path}/members/${memberId}/history`;
+    const dayMs = 24 * 60 * 60_000;
+    const day = new Date(Date.now() - 2 * dayMs);
+    day.setUTCHours(0, 0, 0, 0);
+    const at = (offset: number) => new Date(day.getTime() + offset).toISOString();
+    const query = { from: at(0), to: at(dayMs) };
+    const history = (cookie: string, filter = query, cursor?: string, resource = historyPath) => {
+      const params = new URLSearchParams(filter);
+      if (cursor) params.set("cursor", cursor);
+      return request(`${resource}?${params}`, { cookie });
+    };
+
+    assert.equal((await history("")).status, 401);
+    assert.equal((await history(winner.cookie)).status, 404);
+    assert.equal((await history(owner.cookie, query, undefined, `${path}/members/${winner.body.user.id}/history`)).status, 404);
+    assert.equal((await history(owner.cookie, { from: query.to, to: query.from })).status, 400);
+    assert.equal((await history(owner.cookie, { from: query.from, to: at(2 * dayMs) })).status, 400);
+    assert.equal((await history(owner.cookie, query, "invalid-cursor")).status, 400);
+    assert.equal((await history(owner.cookie, { from: query.from, to: at(dayMs + 60 * 60_000) })).status, 200);
+    assert.equal((await request(`${historyPath}?${new URLSearchParams(query)}&_=${Date.now()}`, {
+      cookie: owner.cookie, origin: null, mobile: true,
+    })).status, 200);
+
+    const sharing = await request(path + "/sharing", { cookie: owner.cookie });
+    const session = sharing.body.activeSession as TrackingSession;
+    const expired = at(-31 * dayMs);
+    await pool.query("UPDATE tracking_sessions SET started_at = $1 WHERE id = $2", [expired, session.id]);
+    await pool.query("UPDATE circle_memberships SET joined_at = $1 WHERE circle_id = $2 AND user_id = $3", [expired, circleId, memberId]);
+    await pool.query("UPDATE circle_memberships SET joined_at = $1 WHERE circle_id = $2 AND user_id = $3", [at(1), circleId, loser.body.user.id]);
+    // Seed fixes on each boundary and more than a page at the exact same millisecond.
+    const stored = await pool.query<{ id: string; captured_at: Date }>(`
+      INSERT INTO location_points (id, session_id, circle_id, user_id, device_id, event_id, captured_at, received_at, latitude, longitude, accuracy_m)
+      SELECT gen_random_uuid(), s.id, s.circle_id, s.user_id, s.device_id, gen_random_uuid(), fixture.captured_at, now(), 35, -120, 8
+      FROM tracking_sessions s CROSS JOIN unnest($2::timestamptz[]) AS fixture(captured_at)
+      WHERE s.id = $1
+      RETURNING id, captured_at
+    `, [session.id, [expired, at(-1), at(0), ...Array<string>(102).fill(at(1)), at(dayMs)]]);
+
+    const first = await history(loser.cookie);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(first.cacheControl, "private, no-store");
+    const firstPage = first.body as LocationHistory;
+    assert.equal(firstPage.status, "available");
+    assert.equal(firstPage.points.length, 100);
+    assert.ok(firstPage.nextCursor);
+    const second = await history(loser.cookie, query, firstPage.nextCursor);
+    assert.equal(second.status, 200);
+    const secondPage = second.body as LocationHistory;
+    assert.equal(secondPage.nextCursor, null);
+    const points = [...firstPage.points, ...secondPage.points];
+    const expected = stored.rows.filter(row => row.captured_at.toISOString() === at(1)).map(row => row.id).sort();
+    assert.deepEqual(points.map(point => point.id), expected);
+    assert.ok(points.every(point => point.capturedAt === at(1) && point.segment === points[0].segment && !("sessionId" in point)));
+
+    const own = await history(owner.cookie);
+    assert.equal(own.status, 200);
+    assert.equal(own.body.points[0].capturedAt, query.from);
+    const adjacent = await history(owner.cookie, { from: query.to, to: at(2 * dayMs) });
+    assert.deepEqual(adjacent.body.points.map((point: { capturedAt: string }) => point.capturedAt), [query.to]);
+    const old = await history(owner.cookie, { from: expired, to: at(-30 * dayMs) });
+    assert.deepEqual(old.body, { status: "available", points: [], nextCursor: null });
+
+    assert.equal((await request(`${path}/tracking-sessions/${session.id}/pause`, { cookie: owner.cookie, data: {} })).status, 200);
+    const paused = await history(loser.cookie, query, firstPage.nextCursor);
+    assert.equal(paused.status, 200);
+    assert.deepEqual(paused.body, { status: "sharing_off", points: [], nextCursor: null });
+    assert.deepEqual((await history(owner.cookie)).body, own.body);
   });
 
   assert.equal((await request("/api/auth/sign-out", { cookie: owner.cookie, data: {} })).status, 200);
