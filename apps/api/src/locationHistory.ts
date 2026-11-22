@@ -11,7 +11,10 @@ type Locals = { userId: string };
 const pageSize = 100;
 const requestQuery = historyQuery.safeExtend({
   // React Native's fetch appends a cache-busting timestamp for no-store requests.
-  _: z.string().regex(/^\d{1,16}$/).optional(),
+  _: z
+    .string()
+    .regex(/^\d{1,16}$/)
+    .optional(),
 });
 
 export function locationRetentionCutoff(days: number) {
@@ -23,7 +26,8 @@ export function createLocationHistoryRouter(db: Database, retentionDays: number)
   const viewer = alias(memberships, "viewer");
 
   router.get<{ id: string; memberId: string }, LocationHistory, unknown, unknown, Locals>(
-    "/circles/:id/members/:memberId/history", async (req, res) => {
+    "/circles/:id/members/:memberId/history",
+    async (req, res) => {
       const circle = circleId.safeParse(req.params.id);
       if (!circle.success) throw new RequestError(404, "Circle not found.");
       const query = requestQuery.safeParse(req.query);
@@ -36,24 +40,63 @@ export function createLocationHistoryRouter(db: Database, retentionDays: number)
         : undefined;
 
       // The membership, consent, and location reads share a snapshot, including on later pages.
-      const page = db.select({
-        id: locationPoints.id, sessionId: locationPoints.sessionId, capturedAt: locationPoints.capturedAt,
-        latitude: locationPoints.latitude, longitude: locationPoints.longitude, accuracyM: locationPoints.accuracyM,
-      }).from(locationPoints).where(and(
-        eq(locationPoints.circleId, memberships.circleId), eq(locationPoints.userId, memberships.userId), allowed,
-        gte(locationPoints.capturedAt, sql`greatest(${from}::timestamptz, ${viewer.joinedAt}, ${locationRetentionCutoff(retentionDays)})`),
-        lt(locationPoints.capturedAt, sql`least(${to}::timestamptz, statement_timestamp())`), afterCursor,
-      )).orderBy(asc(locationPoints.capturedAt), asc(locationPoints.id)).limit(pageSize + 1).as("history_page");
+      const page = db
+        .select({
+          id: locationPoints.id,
+          sessionId: locationPoints.sessionId,
+          capturedAt: locationPoints.capturedAt,
+          latitude: locationPoints.latitude,
+          longitude: locationPoints.longitude,
+          accuracyM: locationPoints.accuracyM,
+        })
+        .from(locationPoints)
+        .where(
+          and(
+            eq(locationPoints.circleId, memberships.circleId),
+            eq(locationPoints.userId, memberships.userId),
+            allowed,
+            gte(
+              locationPoints.capturedAt,
+              sql`greatest(${from}::timestamptz, ${viewer.joinedAt}, ${locationRetentionCutoff(retentionDays)})`,
+            ),
+            lt(locationPoints.capturedAt, sql`least(${to}::timestamptz, statement_timestamp())`),
+            afterCursor,
+          ),
+        )
+        .orderBy(asc(locationPoints.capturedAt), asc(locationPoints.id))
+        .limit(pageSize + 1)
+        .as("history_page");
 
-      const rows = await db.select({ allowed: sql<boolean>`${allowed}`, point: {
-        id: page.id, sessionId: page.sessionId, capturedAt: page.capturedAt,
-        latitude: page.latitude, longitude: page.longitude, accuracyM: page.accuracyM,
-      } }).from(memberships)
+      const rows = await db
+        .select({
+          allowed: sql<boolean>`${allowed}`,
+          point: {
+            id: page.id,
+            sessionId: page.sessionId,
+            capturedAt: page.capturedAt,
+            latitude: page.latitude,
+            longitude: page.longitude,
+            accuracyM: page.accuracyM,
+          },
+        })
+        .from(memberships)
         .innerJoin(viewer, and(eq(viewer.circleId, memberships.circleId), eq(viewer.userId, userId)))
-        .leftJoin(trackingSessions, and(
-          eq(trackingSessions.circleId, memberships.circleId), eq(trackingSessions.userId, memberships.userId), isNull(trackingSessions.endedAt),
-        ))
-        .leftJoin(devices, and(eq(devices.id, trackingSessions.deviceId), eq(devices.userId, trackingSessions.userId), isNull(devices.revokedAt)))
+        .leftJoin(
+          trackingSessions,
+          and(
+            eq(trackingSessions.circleId, memberships.circleId),
+            eq(trackingSessions.userId, memberships.userId),
+            isNull(trackingSessions.endedAt),
+          ),
+        )
+        .leftJoin(
+          devices,
+          and(
+            eq(devices.id, trackingSessions.deviceId),
+            eq(devices.userId, trackingSessions.userId),
+            isNull(devices.revokedAt),
+          ),
+        )
         .leftJoinLateral(page, sql`true`)
         .where(and(eq(memberships.circleId, circle.data), eq(memberships.userId, req.params.memberId)))
         .orderBy(asc(page.capturedAt), asc(page.id));

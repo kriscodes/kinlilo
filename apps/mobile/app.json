@@ -3,13 +3,8 @@
     "name": "Kinlilo",
     "slug": "kinlilo",
     "scheme": "kinlilo",
-    "platforms": [
-      "ios",
-      "android"
-    ],
-    "plugins": [
-      "expo-secure-store"
-    ],
+    "platforms": ["ios", "android"],
+    "plugins": ["expo-secure-store"],
     "ios": {
       "bundleIdentifier": "com.kriscodes.kinlilo"
     },

@@ -16,14 +16,18 @@ export function createApp(config: Config) {
   const app = express();
   app.disable("x-powered-by");
 
-  app.use(cors({
-    origin: config.webOrigin,
-    credentials: true,
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "X-Kinlilo-Client"],
-  }));
+  app.use(
+    cors({
+      origin: config.webOrigin,
+      credentials: true,
+      methods: ["GET", "POST"],
+      allowedHeaders: ["Content-Type", "X-Kinlilo-Client"],
+    }),
+  );
 
-  app.get("/health", (_req, res) => { res.json({ ok: true }); });
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
   app.use(["/api/auth", "/v1"], (_req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
@@ -53,12 +57,15 @@ export function createApp(config: Config) {
     res.locals.userId = session.user.id;
     next();
   });
-  app.use("/v1", rateLimit({
-    windowMs: 60_000,
-    limit: 120,
-    keyGenerator: (_req, res) => res.locals.userId,
-    handler: (_req, _res, next) => next(new RequestError(429, "Too many requests. Try again in a minute.")),
-  }));
+  app.use(
+    "/v1",
+    rateLimit({
+      windowMs: 60_000,
+      limit: 120,
+      keyGenerator: (_req, res) => res.locals.userId,
+      handler: (_req, _res, next) => next(new RequestError(429, "Too many requests. Try again in a minute.")),
+    }),
+  );
   app.use("/v1/circles", createCirclesRouter(db));
   app.use("/v1", createSharingRouter(db));
   app.use("/v1", createLocationsRouter(db, config.locationRetentionDays));

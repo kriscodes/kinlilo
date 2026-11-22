@@ -26,7 +26,7 @@ async function openOutbox(create: boolean) {
     if (!cipher?.cipher_version) throw new Error("SQLCipher is missing.");
     if (key === null) {
       const bytes = await Crypto.getRandomBytesAsync(32);
-      key = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+      key = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
       await SecureStore.setItemAsync(keyName, key, keyOptions);
     }
     // PRAGMA key requires a literal. Only a 256-bit hexadecimal key is accepted here.
@@ -68,14 +68,19 @@ async function openOutbox(create: boolean) {
   }
 }
 
-function withOutboxDatabase<T>(operation: (db: SQLite.SQLiteDatabase) => Promise<T>, create = false): Promise<T | null> {
+function withOutboxDatabase<T>(
+  operation: (db: SQLite.SQLiteDatabase) => Promise<T>,
+  create = false,
+): Promise<T | null> {
   // The keyed connection is shared by the task and the UI. Queue all operations outside transactions.
   const next = tail.then(async () => {
     try {
       const db = await openOutbox(create);
       return db ? await operation(db) : null;
     } catch {
-      throw new Error("Encrypted location storage is unavailable. Use a rebuilt iOS app and unlock the device.");
+      throw new Error(
+        "Encrypted location storage is unavailable. Use a rebuilt iOS app and unlock the device.",
+      );
     }
   });
   tail = next.catch(() => {});
@@ -96,8 +101,11 @@ export function getOutboxStatus() {
 }
 
 export async function getInstallationId() {
-  const installation = await withOutboxDatabase(async db => {
-    await db.runAsync("INSERT OR IGNORE INTO installation (id, device_id) VALUES (1, ?)", Crypto.randomUUID());
+  const installation = await withOutboxDatabase(async (db) => {
+    await db.runAsync(
+      "INSERT OR IGNORE INTO installation (id, device_id) VALUES (1, ?)",
+      Crypto.randomUUID(),
+    );
     return db.getFirstAsync<{ device_id: string }>("SELECT device_id FROM installation WHERE id = 1");
   }, true);
   if (!installation) throw new Error("Could not register this iPhone.");
@@ -105,67 +113,117 @@ export async function getInstallationId() {
 }
 
 export function activateOutbox(session: LocalSession) {
-  return withOutboxDatabase(db => db.runAsync(`
+  return withOutboxDatabase(
+    (db) =>
+      db.runAsync(
+        `
     INSERT INTO sharing (id, account_id, circle_id, session_id, capture_after, phase)
     VALUES (1, ?, ?, ?, ?, 'active')
-  `, session.accountId, session.circleId, session.sessionId, session.captureAfter), true);
+  `,
+        session.accountId,
+        session.circleId,
+        session.sessionId,
+        session.captureAfter,
+      ),
+    true,
+  );
 }
 
 export function pauseOutbox(sessionId: string) {
-  return withOutboxDatabase(db => db.runAsync("UPDATE sharing SET phase = 'pausing' WHERE session_id = ?", sessionId));
+  return withOutboxDatabase((db) =>
+    db.runAsync("UPDATE sharing SET phase = 'pausing' WHERE session_id = ?", sessionId),
+  );
 }
 
 export function removeOutbox(sessionId: string) {
-  return withOutboxDatabase(db => db.runAsync("DELETE FROM sharing WHERE session_id = ?", sessionId));
+  return withOutboxDatabase((db) => db.runAsync("DELETE FROM sharing WHERE session_id = ?", sessionId));
 }
 
 async function prune(db: SQLite.SQLiteDatabase, sessionId: string) {
-  const expired = await db.runAsync("DELETE FROM outbox WHERE session_id = ? AND captured_at < ?", sessionId, Date.now() - maximumAgeMs);
-  const excess = await db.runAsync(`
+  const expired = await db.runAsync(
+    "DELETE FROM outbox WHERE session_id = ? AND captured_at < ?",
+    sessionId,
+    Date.now() - maximumAgeMs,
+  );
+  const excess = await db.runAsync(
+    `
     DELETE FROM outbox WHERE event_id IN (
       SELECT event_id FROM outbox WHERE session_id = ? ORDER BY captured_at DESC, event_id DESC LIMIT -1 OFFSET ?
     )
-  `, sessionId, maximumFixes);
+  `,
+    sessionId,
+    maximumFixes,
+  );
   const dropped = expired.changes + excess.changes;
-  if (dropped) await db.runAsync("UPDATE sharing SET dropped = dropped + ? WHERE session_id = ?", dropped, sessionId);
+  if (dropped)
+    await db.runAsync("UPDATE sharing SET dropped = dropped + ? WHERE session_id = ?", dropped, sessionId);
 }
 
 export function enqueueLocations(fixes: LocationObject[]) {
-  return withOutboxDatabase(db => db.withTransactionAsync(async () => {
-    const state = await readStatus(db);
-    if (state?.phase !== "active") return;
-    for (const fix of fixes) {
-      const date = new Date(fix.timestamp);
-      if (!Number.isFinite(date.getTime()) || fix.timestamp < state.captureAfter) continue;
-      const { latitude, longitude, accuracy } = fix.coords;
-      const event = locationEvent.safeParse({ eventId: Crypto.randomUUID(), capturedAt: date.toISOString(), latitude, longitude, accuracyM: accuracy });
-      if (!event.success) continue;
-      await db.runAsync(`
+  return withOutboxDatabase((db) =>
+    db.withTransactionAsync(async () => {
+      const state = await readStatus(db);
+      if (state?.phase !== "active") return;
+      for (const fix of fixes) {
+        const date = new Date(fix.timestamp);
+        if (!Number.isFinite(date.getTime()) || fix.timestamp < state.captureAfter) continue;
+        const { latitude, longitude, accuracy } = fix.coords;
+        const event = locationEvent.safeParse({
+          eventId: Crypto.randomUUID(),
+          capturedAt: date.toISOString(),
+          latitude,
+          longitude,
+          accuracyM: accuracy,
+        });
+        if (!event.success) continue;
+        await db.runAsync(
+          `
         INSERT INTO outbox (event_id, session_id, captured_at, latitude, longitude, accuracy_m) VALUES (?, ?, ?, ?, ?, ?)
-      `, event.data.eventId, state.sessionId, date.getTime(), latitude, longitude, event.data.accuracyM);
-    }
-    await prune(db, state.sessionId);
-  }));
+      `,
+          event.data.eventId,
+          state.sessionId,
+          date.getTime(),
+          latitude,
+          longitude,
+          event.data.accuracyM,
+        );
+      }
+      await prune(db, state.sessionId);
+    }),
+  );
 }
 
 export async function nextLocationBatch(sessionId: string): Promise<LocationEvent[]> {
-  const rows = await withOutboxDatabase(async db => {
+  const rows = await withOutboxDatabase(async (db) => {
     await db.withTransactionAsync(() => prune(db, sessionId));
-    return db.getAllAsync<Omit<LocationEvent, "capturedAt"> & { capturedAt: number }>(`
+    return db.getAllAsync<Omit<LocationEvent, "capturedAt"> & { capturedAt: number }>(
+      `
       SELECT event_id AS eventId, captured_at AS capturedAt, latitude, longitude, accuracy_m AS accuracyM
       FROM outbox WHERE session_id = ? ORDER BY captured_at, event_id LIMIT 100
-    `, sessionId);
+    `,
+      sessionId,
+    );
   });
-  return (rows ?? []).map(row => ({ ...row, capturedAt: new Date(row.capturedAt).toISOString() }));
+  return (rows ?? []).map((row) => ({ ...row, capturedAt: new Date(row.capturedAt).toISOString() }));
 }
 
 export function acknowledgeBatch(sessionId: string, eventIds: string[], rejected: number) {
   if (eventIds.length === 0) return;
-  return withOutboxDatabase(db => db.withTransactionAsync(async () => {
-    const parameters = eventIds.map(() => "?").join(", ");
-    await db.runAsync(`DELETE FROM outbox WHERE session_id = ? AND event_id IN (${parameters})`, sessionId, ...eventIds);
-    if (rejected) {
-      await db.runAsync("UPDATE sharing SET dropped = dropped + ? WHERE session_id = ? AND phase = 'active'", rejected, sessionId);
-    }
-  }));
+  return withOutboxDatabase((db) =>
+    db.withTransactionAsync(async () => {
+      const parameters = eventIds.map(() => "?").join(", ");
+      await db.runAsync(
+        `DELETE FROM outbox WHERE session_id = ? AND event_id IN (${parameters})`,
+        sessionId,
+        ...eventIds,
+      );
+      if (rejected) {
+        await db.runAsync(
+          "UPDATE sharing SET dropped = dropped + ? WHERE session_id = ? AND phase = 'active'",
+          rejected,
+          sessionId,
+        );
+      }
+    }),
+  );
 }

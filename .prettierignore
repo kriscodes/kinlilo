@@ -1,0 +1,4 @@
+# Generated files and vendored data
+pnpm-lock.yaml
+**/next-env.d.ts
+apps/web/public/maps/land.geojson

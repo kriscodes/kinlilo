@@ -9,16 +9,20 @@ export function useLocationQuery<T>(load: (signal: AbortSignal) => Promise<T>) {
   const [accessLost, setAccessLost] = useState(false);
 
   useEffect(() => {
-    const poller = createLocationPoller(load, result => {
-      setData(result);
-      setAccessLost(false);
-      setError("");
-    }, failure => {
-      const hidden = failure instanceof ApiError && (failure.status === 401 || failure.status === 404);
-      setData(null);
-      setAccessLost(hidden);
-      setError(hidden ? "These locations are no longer available to you." : "Could not refresh locations.");
-    });
+    const poller = createLocationPoller(
+      load,
+      (result) => {
+        setData(result);
+        setAccessLost(false);
+        setError("");
+      },
+      (failure) => {
+        const hidden = failure instanceof ApiError && (failure.status === 401 || failure.status === 404);
+        setData(null);
+        setAccessLost(hidden);
+        setError(hidden ? "These locations are no longer available to you." : "Could not refresh locations.");
+      },
+    );
     function update() {
       if (document.visibilityState === "visible" && navigator.onLine) poller.refresh();
       else {

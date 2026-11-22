@@ -11,10 +11,7 @@ export type MemberLocation = {
   id: string;
   name: string;
   role: "owner" | "member";
-} & (
-  | { status: FixStatus; fix: LocationFix }
-  | { status: "off" | "paused" | "unavailable"; fix: null }
-);
+} & ({ status: FixStatus; fix: LocationFix } | { status: "off" | "paused" | "unavailable"; fix: null });
 export type CircleLocations = { members: MemberLocation[] };
 export type MappedMember = Extract<MemberLocation, { fix: LocationFix }>;
 
@@ -46,16 +43,19 @@ export function createLocationPoller<T>(
       onError(new Error("Could not refresh locations in time."));
       timer = setTimeout(refresh, locationPollIntervalMs);
     }, 10_000);
-    void load(controller.signal).then(locations => {
-      if (request === controller) onLocations(locations);
-    }).catch(error => {
-      if (request === controller) onError(error);
-    }).finally(() => {
-      if (request !== controller) return;
-      request = undefined;
-      clearTimeout(deadline);
-      timer = setTimeout(refresh, locationPollIntervalMs);
-    });
+    void load(controller.signal)
+      .then((locations) => {
+        if (request === controller) onLocations(locations);
+      })
+      .catch((error) => {
+        if (request === controller) onError(error);
+      })
+      .finally(() => {
+        if (request !== controller) return;
+        request = undefined;
+        clearTimeout(deadline);
+        timer = setTimeout(refresh, locationPollIntervalMs);
+      });
   }
 
   return { refresh, stop };
@@ -70,7 +70,11 @@ export const locationStatusLabel: Record<MemberLocationStatus, string> = {
   unavailable: "Location unavailable",
 };
 
-export const fixColors: Record<FixStatus, string> = { recent: "#563b72", delayed: "#805218", stale: "#625b70" };
+export const fixColors: Record<FixStatus, string> = {
+  recent: "#563b72",
+  delayed: "#805218",
+  stale: "#625b70",
+};
 
 export function getFixStatus(capturedAtMs: number, nowMs: number): FixStatus {
   const ageMs = nowMs - capturedAtMs;
@@ -90,13 +94,17 @@ export type LocationMarker = { id: string; title: string; detail: string; color:
 
 export function latestLocationMarkers(members: readonly MappedMember[]): LocationMarker[] {
   return members.map(({ id, name, status, fix }) => ({
-    id, title: name, detail: `${locationStatusLabel[status]} · ${describeFix(fix)}`, color: fixColors[status], fix,
+    id,
+    title: name,
+    detail: `${locationStatusLabel[status]} · ${describeFix(fix)}`,
+    color: fixColors[status],
+    fix,
   }));
 }
 
 export function locationBounds(members: readonly { fix: LocationFix }[]) {
-  const longitudes = members.map(member => member.fix.longitude).sort((a, b) => a - b);
-  const latitudes = members.map(member => member.fix.latitude);
+  const longitudes = members.map((member) => member.fix.longitude).sort((a, b) => a - b);
+  const latitudes = members.map((member) => member.fix.latitude);
   let west = longitudes[0];
   let east = longitudes.at(-1)!;
   let largestGap = west + 360 - east;

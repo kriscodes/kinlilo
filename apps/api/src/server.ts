@@ -8,6 +8,8 @@ const server = app.listen(config.port, config.host, () => {
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    server.close(() => { void pool.end(); });
+    server.close(() => {
+      void pool.end();
+    });
   });
 }

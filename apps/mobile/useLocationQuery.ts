@@ -9,21 +9,28 @@ export function useLocationQuery<T>(load: (signal: AbortSignal) => Promise<T>) {
   const [accessLost, setAccessLost] = useState(false);
 
   useEffect(() => {
-    const poller = createLocationPoller(load, result => {
-      setData(result);
-      setAccessLost(false);
-      setError("");
-    }, failure => {
-      const hidden = failure instanceof ApiError && (failure.status === 401 || failure.status === 404);
-      setData(null);
-      setAccessLost(hidden);
-      setError(hidden ? "These locations are no longer available to you." : "Could not refresh locations.");
-    });
-    const appState = AppState.addEventListener("change", state => {
+    const poller = createLocationPoller(
+      load,
+      (result) => {
+        setData(result);
+        setAccessLost(false);
+        setError("");
+      },
+      (failure) => {
+        const hidden = failure instanceof ApiError && (failure.status === 401 || failure.status === 404);
+        setData(null);
+        setAccessLost(hidden);
+        setError(hidden ? "These locations are no longer available to you." : "Could not refresh locations.");
+      },
+    );
+    const appState = AppState.addEventListener("change", (state) => {
       if (state === "active") poller.refresh();
-      else { poller.stop(); setData(null); }
+      else {
+        poller.stop();
+        setData(null);
+      }
     });
-    const network = Network.addNetworkStateListener(state => {
+    const network = Network.addNetworkStateListener((state) => {
       if (state.isConnected && AppState.currentState === "active") poller.refresh();
       if (state.isConnected === false) {
         poller.stop();
@@ -32,7 +39,11 @@ export function useLocationQuery<T>(load: (signal: AbortSignal) => Promise<T>) {
       }
     });
     if (AppState.currentState === "active") poller.refresh();
-    return () => { poller.stop(); appState.remove(); network.remove(); };
+    return () => {
+      poller.stop();
+      appState.remove();
+      network.remove();
+    };
   }, [load]);
 
   return { data, error, accessLost };

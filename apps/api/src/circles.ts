@@ -6,7 +6,12 @@ import { authUsers, circles, invites, lockAccount, memberships, type Database } 
 type Locals = { userId: string };
 
 class RequestError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 function parseCircleId(value: unknown) {
@@ -23,12 +28,15 @@ export function createCirclesRouter(db: Database) {
   const router = Router();
 
   async function getCircleSummaryForMember(requestedCircleId: string, userId: string) {
-    const [circle] = await db.select({
-      id: circles.id,
-      name: circles.name,
-      role: memberships.role,
-      memberCount: db.$count(memberships, eq(memberships.circleId, circles.id)),
-    }).from(memberships).innerJoin(circles, eq(circles.id, memberships.circleId))
+    const [circle] = await db
+      .select({
+        id: circles.id,
+        name: circles.name,
+        role: memberships.role,
+        memberCount: db.$count(memberships, eq(memberships.circleId, circles.id)),
+      })
+      .from(memberships)
+      .innerJoin(circles, eq(circles.id, memberships.circleId))
       .where(and(eq(memberships.userId, userId), eq(memberships.circleId, requestedCircleId)));
 
     if (!circle) throw new RequestError(404, "Circle not found.");
@@ -36,13 +44,17 @@ export function createCirclesRouter(db: Database) {
   }
 
   router.get<object, unknown, unknown, unknown, Locals>("/", async (_req, res) => {
-    const result = await db.select({
-      id: circles.id,
-      name: circles.name,
-      role: memberships.role,
-      memberCount: db.$count(memberships, eq(memberships.circleId, circles.id)),
-    }).from(memberships).innerJoin(circles, eq(circles.id, memberships.circleId))
-      .where(eq(memberships.userId, res.locals.userId)).orderBy(asc(circles.name), asc(circles.id));
+    const result = await db
+      .select({
+        id: circles.id,
+        name: circles.name,
+        role: memberships.role,
+        memberCount: db.$count(memberships, eq(memberships.circleId, circles.id)),
+      })
+      .from(memberships)
+      .innerJoin(circles, eq(circles.id, memberships.circleId))
+      .where(eq(memberships.userId, res.locals.userId))
+      .orderBy(asc(circles.name), asc(circles.id));
     res.json({ circles: result });
   });
 
@@ -50,7 +62,7 @@ export function createCirclesRouter(db: Database) {
     const parsed = createCircle.safeParse(req.body);
     if (!parsed.success) throw new RequestError(400, "Enter a circle name of 1 to 60 characters.");
     const id = randomUUID();
-    await db.transaction(async tx => {
+    await db.transaction(async (tx) => {
       await tx.insert(circles).values({ id, name: parsed.data.name });
       await tx.insert(memberships).values({ circleId: id, userId: res.locals.userId, role: "owner" });
     });
@@ -63,21 +75,36 @@ export function createCirclesRouter(db: Database) {
     const tokenHash = hashCode(parsed.data.code);
     const userId = res.locals.userId;
 
-    const joined = await db.transaction(async tx => {
+    const joined = await db.transaction(async (tx) => {
       // The conditional update locks the invite row and lets only one transaction claim it.
-      const [claimed] = await tx.update(invites).set({ redeemedAt: sql`clock_timestamp()` })
-        .where(and(eq(invites.tokenHash, tokenHash), isNull(invites.redeemedAt), gt(invites.expiresAt, sql`clock_timestamp()`)))
+      const [claimed] = await tx
+        .update(invites)
+        .set({ redeemedAt: sql`clock_timestamp()` })
+        .where(
+          and(
+            eq(invites.tokenHash, tokenHash),
+            isNull(invites.redeemedAt),
+            gt(invites.expiresAt, sql`clock_timestamp()`),
+          ),
+        )
         .returning({ circleId: invites.circleId });
       if (!claimed) throw new RequestError(404, "This invitation is invalid, expired, or already used.");
 
-      const [member] = await tx.insert(memberships).values({ circleId: claimed.circleId, userId, role: "member" })
-        .onConflictDoNothing().returning({ circleId: memberships.circleId });
+      const [member] = await tx
+        .insert(memberships)
+        .values({ circleId: claimed.circleId, userId, role: "member" })
+        .onConflictDoNothing()
+        .returning({ circleId: memberships.circleId });
       // Roll back the claim if this account already belongs to the circle.
       if (!member) throw new RequestError(409, "You already belong to this circle.");
 
-      const [circle] = await tx.select({ id: circles.id, name: circles.name }).from(circles)
+      const [circle] = await tx
+        .select({ id: circles.id, name: circles.name })
+        .from(circles)
         .where(eq(circles.id, member.circleId));
-      const [{ memberCount }] = await tx.select({ memberCount: count() }).from(memberships)
+      const [{ memberCount }] = await tx
+        .select({ memberCount: count() })
+        .from(memberships)
         .where(eq(memberships.circleId, member.circleId));
       return { ...circle, role: "member", memberCount };
     });
@@ -88,16 +115,21 @@ export function createCirclesRouter(db: Database) {
     const id = parseCircleId(req.params.id);
     const userId = res.locals.userId;
     const circle = await getCircleSummaryForMember(id, userId);
-    const viewer = db.select({ id: memberships.circleId }).from(memberships)
+    const viewer = db
+      .select({ id: memberships.circleId })
+      .from(memberships)
       .where(and(eq(memberships.circleId, id), eq(memberships.userId, userId)));
-    const members = await db.select({
-      id: memberships.userId,
-      name: authUsers.name,
-      role: memberships.role,
-    }).from(memberships).innerJoin(authUsers, eq(authUsers.id, memberships.userId))
+    const members = await db
+      .select({
+        id: memberships.userId,
+        name: authUsers.name,
+        role: memberships.role,
+      })
+      .from(memberships)
+      .innerJoin(authUsers, eq(authUsers.id, memberships.userId))
       .where(and(eq(memberships.circleId, id), sql`exists (${viewer})`))
       .orderBy(asc(authUsers.name), asc(memberships.userId));
-    if (!members.some(member => member.id === userId)) throw new RequestError(404, "Circle not found.");
+    if (!members.some((member) => member.id === userId)) throw new RequestError(404, "Circle not found.");
     res.json({ ...circle, members, memberCount: members.length });
   });
 
@@ -117,10 +149,13 @@ export function createCirclesRouter(db: Database) {
     const circle = await getCircleSummaryForMember(id, res.locals.userId);
     if (circle.role === "owner") throw new RequestError(409, "The owner cannot leave their circle.");
     const userId = res.locals.userId;
-    await db.transaction(async tx => {
-      if (!await lockAccount(tx, userId)) throw new RequestError(401, "Sign in to continue.");
-      const [removed] = await tx.delete(memberships)
-        .where(and(eq(memberships.circleId, id), eq(memberships.userId, userId), eq(memberships.role, "member")))
+    await db.transaction(async (tx) => {
+      if (!(await lockAccount(tx, userId))) throw new RequestError(401, "Sign in to continue.");
+      const [removed] = await tx
+        .delete(memberships)
+        .where(
+          and(eq(memberships.circleId, id), eq(memberships.userId, userId), eq(memberships.role, "member")),
+        )
         .returning({ id: memberships.userId });
       if (!removed) throw new RequestError(404, "Circle not found.");
     });

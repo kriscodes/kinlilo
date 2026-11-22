@@ -22,7 +22,7 @@ try {
   await connection.query("BEGIN");
   await connection.query("CREATE TABLE IF NOT EXISTS kinlilo_migrations (version integer PRIMARY KEY)");
   const applied = await connection.query<{ version: number }>("SELECT version FROM kinlilo_migrations");
-  const appliedVersions = new Set(applied.rows.map(row => row.version));
+  const appliedVersions = new Set(applied.rows.map((row) => row.version));
   for (const { version, filename } of migrations) {
     if (appliedVersions.has(version)) continue;
     const migration = await readFile(new URL("../migrations/" + filename, import.meta.url), "utf8");

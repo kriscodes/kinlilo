@@ -10,6 +10,8 @@
     "dev:mobile": "pnpm --filter @kinlilo/mobile dev",
     "db:migrate": "pnpm --filter @kinlilo/api db:migrate",
     "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write --ignore-path .gitignore --ignore-path .prettierignore .",
+    "format:check": "prettier --check --ignore-path .gitignore --ignore-path .prettierignore .",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @kinlilo/web build",
     "test:integration": "pnpm --filter @kinlilo/api test:integration"

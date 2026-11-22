@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: kinlilo
       POSTGRES_PASSWORD: kinlilo
     ports:
-      - '127.0.0.1:54399:5432'
+      - "127.0.0.1:54399:5432"
     volumes:
       - kinlilo_db:/var/lib/postgresql/data
     healthcheck:

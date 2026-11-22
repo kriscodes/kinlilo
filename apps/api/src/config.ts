@@ -12,7 +12,10 @@ const env = z.object({
 export function readConfig() {
   const result = env.safeParse(process.env);
   if (!result.success) {
-    throw new Error("Check Kinlilo environment settings: " + result.error.issues.map(issue => issue.path.join(".")).join(", "));
+    throw new Error(
+      "Check Kinlilo environment settings: " +
+        result.error.issues.map((issue) => issue.path.join(".")).join(", "),
+    );
   }
   const values = result.data;
   return {

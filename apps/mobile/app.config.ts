@@ -8,13 +8,17 @@ export default ({ config }: ConfigContext): Partial<ExpoConfig> => {
     plugins: [
       ...(config.plugins ?? []),
       ["expo-sqlite", { ios: { useSQLCipher: true } }],
-      ["expo-location", {
-        isIosBackgroundLocationEnabled: true,
-        locationWhenInUsePermission: harness
-          ? "Allow Kinlilo to use your location for circle sharing or the iOS test harness."
-          : "Allow Kinlilo to collect your location when you turn on circle sharing.",
-        locationAlwaysAndWhenInUsePermission: "Allow Kinlilo to collect location in the background while you have sharing turned on.",
-      }],
+      [
+        "expo-location",
+        {
+          isIosBackgroundLocationEnabled: true,
+          locationWhenInUsePermission: harness
+            ? "Allow Kinlilo to use your location for circle sharing or the iOS test harness."
+            : "Allow Kinlilo to collect your location when you turn on circle sharing.",
+          locationAlwaysAndWhenInUsePermission:
+            "Allow Kinlilo to collect location in the background while you have sharing turned on.",
+        },
+      ],
     ],
   };
 };

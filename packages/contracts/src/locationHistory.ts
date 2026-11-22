@@ -3,17 +3,22 @@ import { describeFix, fixColors, type LocationFix, type LocationMarker } from ".
 
 const instant = z.iso.datetime({ precision: 3 });
 const cursorParts = z.tuple([instant, z.uuid()]);
-const historyCursor = z.string().max(64).transform((value, ctx) => {
-  const parts = cursorParts.safeParse(value.split("/"));
-  if (!parts.success) {
-    ctx.addIssue({ code: "custom", message: "Invalid history cursor." });
-    return z.NEVER;
-  }
-  const [capturedAt, id] = parts.data;
-  return { capturedAt, id };
-});
+const historyCursor = z
+  .string()
+  .max(64)
+  .transform((value, ctx) => {
+    const parts = cursorParts.safeParse(value.split("/"));
+    if (!parts.success) {
+      ctx.addIssue({ code: "custom", message: "Invalid history cursor." });
+      return z.NEVER;
+    }
+    const [capturedAt, id] = parts.data;
+    return { capturedAt, id };
+  });
 
-export const historyQuery = z.object({ from: instant, to: instant, cursor: historyCursor.optional() }).strict()
+export const historyQuery = z
+  .object({ from: instant, to: instant, cursor: historyCursor.optional() })
+  .strict()
   .refine(({ from, to }) => {
     const duration = Date.parse(to) - Date.parse(from);
     return duration > 0 && duration <= 25 * 60 * 60_000;
@@ -43,8 +48,11 @@ export function getLocalDayRange(value: string) {
 }
 
 export function hasHistoryGap(previous: HistoryPoint | undefined, point: HistoryPoint) {
-  return previous !== undefined && (previous.segment !== point.segment
-    || Date.parse(point.capturedAt) - Date.parse(previous.capturedAt) > 10 * 60_000);
+  return (
+    previous !== undefined &&
+    (previous.segment !== point.segment ||
+      Date.parse(point.capturedAt) - Date.parse(previous.capturedAt) > 10 * 60_000)
+  );
 }
 
 export function buildHistoryPaths(points: HistoryPoint[]) {
@@ -57,9 +65,15 @@ export function buildHistoryPaths(points: HistoryPoint[]) {
     paths.at(-1)!.push(point);
     previous = point;
   }
-  return paths.filter(path => path.length > 1);
+  return paths.filter((path) => path.length > 1);
 }
 
 export function historyLocationMarkers(points: HistoryPoint[]): LocationMarker[] {
-  return points.map(fix => ({ id: fix.id, title: "Recorded fix", detail: describeFix(fix), color: fixColors.recent, fix }));
+  return points.map((fix) => ({
+    id: fix.id,
+    title: "Recorded fix",
+    detail: describeFix(fix),
+    color: fixColors.recent,
+    fix,
+  }));
 }

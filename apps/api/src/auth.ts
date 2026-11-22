@@ -13,7 +13,7 @@ export function createAuth(config: Config, pool: Pool) {
     trustedOrigins: [config.webOrigin, "kinlilo://", ...(!config.production ? ["exp://**"] : [])],
     emailAndPassword: { enabled: true, minPasswordLength: 12, maxPasswordLength: 128 },
     hooks: {
-      before: createAuthMiddleware(async context => {
+      before: createAuthMiddleware(async (context) => {
         if (context.path !== "/sign-up/email" && context.path !== "/update-user") return;
         if (context.body?.name === undefined && context.path === "/update-user") return;
         const name = typeof context.body?.name === "string" ? context.body.name.trim() : "";
