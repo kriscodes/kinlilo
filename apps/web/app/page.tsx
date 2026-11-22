@@ -3,6 +3,7 @@
 import { createCircleClient, type Circle, type CircleDetails, type CircleInvite } from "@kinlilo/contracts";
 import { createAuthClient } from "better-auth/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import CircleLocations from "./CircleLocations";
 
 const auth = createAuthClient();
 const api = createCircleClient({ baseUrl: "" });
@@ -145,10 +146,7 @@ function CircleWorkspace({ name }: { name: string }) {
     if (!details) return <p className="muted">{error ? "Could not load this circle." : "Loading members…"}</p>;
     return <>
       <div className="section-header"><h2>{details.name}</h2><span className="chip">{details.role === "owner" ? "Owner" : "Member"}</span></div>
-      <h3>Members <span className="muted">· {details.memberCount}</span></h3>
-      <ul className="roster">{details.members.map(member =>
-        <li key={member.id}><span>{member.name}</span><small>{member.role === "owner" ? "Owner" : "Member"}</small></li>,
-      )}</ul>
+      <CircleLocations key={details.id} circle={details} load={api.getLocations} />
       {details.role === "owner"
         ? <button disabled={busy} onClick={() => void perform(async () => {
             const result = await api.invite(details.id);

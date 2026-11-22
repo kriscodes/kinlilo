@@ -45,7 +45,10 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
       body: options.data ? JSON.stringify(options.data) : undefined,
     });
     const body = await response.json();
-    return { status: response.status, body, cookie: response.headers.getSetCookie().map(line => line.split(";")[0]).join("; ") };
+    return {
+      status: response.status, body, cacheControl: response.headers.get("cache-control"),
+      cookie: response.headers.getSetCookie().map(line => line.split(";")[0]).join("; "),
+    };
   }
 
   const signup = (name: string) => request("/api/auth/sign-up/email", {
@@ -94,6 +97,7 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
   const winner = race[0].status === 201 ? first : second;
   const loser = winner === first ? second : first;
   assert.equal((await request(path, { cookie: loser.cookie })).status, 404);
+  assert.equal((await request(path + "/locations", { cookie: loser.cookie })).status, 404);
   assert.equal((await request(path + "/sharing", { cookie: loser.cookie })).status, 404);
   const roster = await request(path, { cookie: winner.cookie });
   assert.equal(roster.status, 200);
@@ -222,6 +226,12 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
     const circleId = create.body.id as string;
     const sharing = () => request(path + "/sharing", { cookie });
     const sessionsPath = path + "/tracking-sessions";
+    const getLocations = (viewer = owner.cookie) => request(path + "/locations", { cookie: viewer });
+    const memberLocation = async (viewer = owner.cookie) => {
+      const response = await getLocations(viewer);
+      assert.equal(response.status, 200);
+      return response.body.members.find((member: { id: string }) => member.id === userId);
+    };
     const register = async () => {
       const response = await request("/v1/devices", { cookie, data: { installationId: randomUUID(), label: "Location test" } });
       assert.equal(response.status, 201);
@@ -252,7 +262,10 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
 
     const phone = await register();
     const spare = await register();
+    assert.equal((await getLocations("")).status, 401);
+    assert.equal((await memberLocation()).status, "off");
     const firstSession = await start(phone);
+    assert.deepEqual(await memberLocation(), { id: userId, name: winner.body.user.name, role: "member", status: "unavailable", fix: null });
     const newest = fix(firstSession, 3_000);
     const older = fix(firstSession);
     const beforeSession = fix(firstSession, -1);
@@ -287,12 +300,26 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
     ]);
     assert.equal(await countPoints(), 2);
     assert.deepEqual(await latest(), { event_id: newest.eventId, captured_at: new Date(newest.capturedAt), accuracy_m: 4 });
+    assert.equal((await getLocations()).cacheControl, "private, no-store");
+    assert.deepEqual(await memberLocation(), {
+      id: userId, name: winner.body.user.name, role: "member", status: "recent",
+      fix: { latitude: newest.latitude, longitude: newest.longitude, accuracyM: newest.accuracyM, capturedAt: newest.capturedAt },
+    });
+    // Set the later viewer's join boundary just past the fixture's capture time.
+    await pool.query("UPDATE circle_memberships SET joined_at = $1 WHERE circle_id = $2 AND user_id = $3", [
+      new Date(Date.parse(newest.capturedAt) + 1), circleId, loser.body.user.id,
+    ]);
+    assert.equal((await memberLocation(loser.cookie)).fix, null);
+    assert.equal((await memberLocation(loser.cookie)).status, "unavailable");
 
     assert.equal((await request(`${sessionsPath}/${firstSession.id}/pause`, { cookie, data: {} })).status, 200);
     assert.equal(await latest(), undefined);
+    assert.equal((await memberLocation()).status, "paused");
+    assert.equal((await memberLocation()).fix, null);
     assert.equal(await countPoints(), 2);
     assert.equal((await upload(firstSession, [newest])).status, 404);
     const resumed = await start(phone);
+    assert.equal((await memberLocation()).status, "unavailable");
     const fresh = fix(resumed);
     assert.deepEqual((await upload(resumed, [{ ...fresh, eventId: newest.eventId }, fresh])).body.results, [
       { eventId: newest.eventId, status: "rejected", reason: "event_conflict" },
@@ -302,6 +329,7 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
 
     const replacement = await start(spare);
     assert.equal(await latest(), undefined);
+    assert.equal((await memberLocation()).status, "unavailable");
     assert.equal((await upload(resumed, [fresh])).status, 404);
     const spareFix = fix(replacement);
     assert.equal((await upload(replacement, [spareFix])).status, 200);
@@ -314,6 +342,7 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
     assert.equal(revoked.status, 200);
     assert.equal((await upload(replacement, [spareFix])).status, 404);
     assert.equal(await latest(), undefined);
+    assert.equal((await memberLocation()).status, "paused");
 
     const leaving = await start(phone);
     assert.equal((await upload(leaving, [fix(leaving)])).body.results[0].status, "accepted");
@@ -321,6 +350,26 @@ test("accounts, private circles, and atomic invitations on PostgreSQL", async t 
     assert.equal((await upload(leaving, [fix(leaving)])).status, 404);
     assert.equal(await latest(), undefined);
     assert.equal(await countPoints(), 0);
+    assert.equal((await getLocations(cookie)).status, 404);
+    assert.equal(await memberLocation(), undefined);
+
+    const ownerDevice = await request("/v1/devices", { cookie: owner.cookie, data: { installationId: randomUUID(), label: "Freshness test" } });
+    const ownerSharing = await request(path + "/sharing", { cookie: owner.cookie });
+    const ownerStart = await request(sessionsPath, { cookie: owner.cookie, data: { deviceId: ownerDevice.body.id, version: ownerSharing.body.version } });
+    assert.equal(ownerStart.status, 201);
+    const ownerSession = ownerStart.body.activeSession as TrackingSession;
+    const getOwner = async () => (await getLocations()).body.members.find((member: { id: string }) => member.id === owner.body.user.id);
+    const earlier = new Date(Date.now() - 60 * 60_000);
+    await pool.query("UPDATE circle_memberships SET joined_at = $1 WHERE circle_id = $2 AND user_id = $3", [earlier, circleId, owner.body.user.id]);
+    await pool.query("UPDATE tracking_sessions SET started_at = $1 WHERE id = $2", [earlier, ownerSession.id]);
+    for (const [minutes, status] of [[30, "stale"], [5, "delayed"]] as const) {
+      const capturedAt = new Date(Date.now() - minutes * 60_000).toISOString();
+      const point = { ...fix(ownerSession), capturedAt };
+      assert.equal((await upload(ownerSession, [point], owner.cookie)).body.results[0].status, "accepted");
+      const latestOwner = await getOwner();
+      assert.equal(latestOwner.status, status);
+      assert.equal(latestOwner.fix.capturedAt, capturedAt);
+    }
   });
 
   assert.equal((await request("/api/auth/sign-out", { cookie: owner.cookie, data: {} })).status, 200);

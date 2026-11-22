@@ -60,7 +60,7 @@ export function createApp(config: Config) {
   }));
   app.use("/v1/circles", createCirclesRouter(db));
   app.use("/v1", createSharingRouter(db));
-  app.use("/v1/location-batches", createLocationsRouter(db));
+  app.use("/v1", createLocationsRouter(db));
   app.use((_req, _res, next) => next(new RequestError(404, "Page not found.")));
 
   const handleError: ErrorRequestHandler = (error, _req, res, _next) => {

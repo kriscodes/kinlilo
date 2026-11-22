@@ -1,9 +1,10 @@
-import { locationBatch, type LocationBatchEventResult, type LocationBatchResult } from "@kinlilo/contracts";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { circleId, getFixStatus, locationBatch, type CircleLocations, type LocationBatchEventResult, type LocationBatchResult } from "@kinlilo/contracts";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { RequestError } from "./circles";
-import { devices, latestLocations, locationPoints, lockAccount, trackingSessions, type Database } from "./db";
+import { authUsers, devices, latestLocations, locationPoints, lockAccount, memberships, trackingSessions, type Database } from "./db";
 
 type Locals = { userId: string };
 type NewPoint = typeof locationPoints.$inferInsert;
@@ -12,7 +13,49 @@ const maximumClockSkewMs = 2 * 60 * 1_000;
 export function createLocationsRouter(db: Database) {
   const router = Router();
 
-  router.post<object, LocationBatchResult, unknown, unknown, Locals>("/", async (req, res) => {
+  router.get<{ id: string }, CircleLocations, unknown, unknown, Locals>("/circles/:id/locations", async (req, res) => {
+    const id = circleId.safeParse(req.params.id);
+    if (!id.success) throw new RequestError(404, "Circle not found.");
+    const viewer = alias(memberships, "viewer");
+    const prior = alias(trackingSessions, "prior_session");
+    const hasShared = db.select({ id: prior.id }).from(prior)
+      .where(and(eq(prior.circleId, memberships.circleId), eq(prior.userId, memberships.userId)));
+
+    // Authorize the viewer and filter every position in the same database snapshot.
+    const members = await db.select({
+      id: authUsers.id, name: authUsers.name, role: memberships.role,
+      activeDeviceId: devices.id,
+      hasShared: sql<boolean>`exists (${hasShared})`,
+      now: sql<Date>`statement_timestamp()`.mapWith(locationPoints.capturedAt),
+      fix: {
+        latitude: locationPoints.latitude, longitude: locationPoints.longitude,
+        accuracyM: locationPoints.accuracyM, capturedAt: locationPoints.capturedAt,
+      },
+    }).from(memberships)
+      .innerJoin(viewer, and(eq(viewer.circleId, memberships.circleId), eq(viewer.userId, res.locals.userId)))
+      .innerJoin(authUsers, eq(authUsers.id, memberships.userId))
+      .leftJoin(trackingSessions, and(
+        eq(trackingSessions.circleId, memberships.circleId), eq(trackingSessions.userId, memberships.userId), isNull(trackingSessions.endedAt),
+      ))
+      .leftJoin(devices, and(eq(devices.id, trackingSessions.deviceId), eq(devices.userId, trackingSessions.userId), isNull(devices.revokedAt)))
+      .leftJoin(latestLocations, and(eq(latestLocations.circleId, memberships.circleId), eq(latestLocations.userId, memberships.userId)))
+      .leftJoin(locationPoints, and(
+        eq(locationPoints.id, latestLocations.pointId), eq(locationPoints.sessionId, trackingSessions.id),
+        isNotNull(devices.id), gte(locationPoints.capturedAt, viewer.joinedAt),
+      ))
+      .where(eq(memberships.circleId, id.data)).orderBy(asc(authUsers.name), asc(authUsers.id));
+    if (!members.length) throw new RequestError(404, "Circle not found.");
+
+    res.set("Cache-Control", "private, no-store").json({
+      members: members.map(({ id, name, role, activeDeviceId, hasShared, now, fix }) => {
+        const member = { id, name, role };
+        if (!fix) return { ...member, status: activeDeviceId ? "unavailable" : hasShared ? "paused" : "off", fix: null };
+        return { ...member, status: getFixStatus(fix.capturedAt.getTime(), now.getTime()), fix: { ...fix, capturedAt: fix.capturedAt.toISOString() } };
+      }),
+    });
+  });
+
+  router.post<object, LocationBatchResult, unknown, unknown, Locals>("/location-batches", async (req, res) => {
     const parsed = locationBatch.safeParse(req.body);
     if (!parsed.success) throw new RequestError(400, "Enter a valid location batch with 1 to 100 samples.");
     const { sessionId, events } = parsed.data;

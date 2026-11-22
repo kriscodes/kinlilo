@@ -10,7 +10,7 @@ This workspace implements email and password accounts, private circles, and invi
 
 The web and native apps use the same Express API and PostgreSQL database. Better Auth manages credentials and revocable sessions. The web uses an HTTP-only cookie. The Expo client stores its session cookie in SecureStore. Invitation codes are stored as hashes. Circle access is checked against current membership, and membership alone does not enable location sharing.
 
-The iOS app can opt into location capture and sync an encrypted outbox to the API. Family maps, history views, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
+The iOS app can opt into location capture and sync an encrypted outbox to the API. Web and iOS show the selected circle’s last reported locations. History views, per-member visibility rules, verification email, and account recovery are future work. Use synthetic accounts and a local database for this review.
 
 ### Start the web app
 
@@ -43,6 +43,12 @@ Rebuild the native app to get SQLCipher. If an iOS project was generated before 
 Sign in, open a circle, and select **Start location sharing**. Allow location access **Always** in iOS Settings. This iPhone can share to one circle at a time. Background callbacks save fixes in the encrypted queue. Bring Kinlilo to the foreground with its signed-in session to sync them. The queue retains up to 10,000 fixes from the last 48 hours.
 
 **Pause location sharing** stops local capture and discards queued fixes. **Pause pending** remains visible while the server is unreachable. Reopen Kinlilo with the same signed-in account and a connection to confirm the pause.
+
+### View last reported locations
+
+Open a circle on web or iOS. The map and member list update while the circle is open in the foreground. Each fix includes its capture time and reported accuracy. After a pause or a device change, a new fix is required before a marker can appear again. Rebuild the iOS app to include Apple Maps support.
+
+The web basemap uses bundled [Natural Earth land geometry](https://www.naturalearthdata.com/about/terms-of-use/). For street detail, set `NEXT_PUBLIC_KINLILO_MAP_STYLE_URL` in the root `.env` to an approved HTTPS MapLibre style and rebuild the web app. A configured tile provider receives viewport-based map requests from the browser.
 
 ### Run the iOS location test
 
@@ -82,7 +88,7 @@ Override `KINLILO_TEST_DATABASE_URL` for different local credentials. Tests use 
 
 ## Location roadmap
 
-The web and mobile apps will show time-stamped positions and trip and stop history. The first physical-device trial will test locked phones, poor connectivity, and battery use. Family or circle administration will not override a member’s consent.
+The web and mobile apps will add trip and stop history. The first physical-device trial will test locked phones, poor connectivity, and battery use. Family or circle administration will not override a member’s consent.
 
 ## Costs and iOS distribution
 

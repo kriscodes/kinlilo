@@ -1,7 +1,8 @@
 import type { Circle, CircleDetails, CircleInvite } from "@kinlilo/contracts";
 import * as Location from "expo-location";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, AppState, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import CircleLocations from "./CircleLocations";
 import {
   clearLocationDiagnostics, getLocationDiagnosticReport, getLocationHarnessStatus, locationHarnessEnabled,
   startLocationHarness, stopLocationHarness,
@@ -153,11 +154,13 @@ function CircleHome({ name, accountId, sharing }: {
     </View>
     {selected && <View style={styles.card}>
       <Text accessibilityRole="header" style={styles.heading}>{selected.name}</Text>
-      <Text style={styles.label}>Members · {selected.memberCount}</Text>
-      {selected.members.map(member => <View key={member.id} style={styles.member}>
-        <Text style={styles.body}>{member.name}</Text>
-        <Text style={styles.muted}>{member.role === "owner" ? "Owner" : "Member"}</Text>
-      </View>)}
+      {Platform.OS === "ios" ? <CircleLocations key={selected.id} circle={selected} /> : <>
+        <Text style={styles.label}>Members · {selected.memberCount}</Text>
+        {selected.members.map(member => <View key={member.id} style={styles.member}>
+          <Text style={styles.body}>{member.name}</Text>
+          <Text style={styles.muted}>{member.role === "owner" ? "Owner" : "Member"}</Text>
+        </View>)}
+      </>}
       {locationSharingAvailable && !sharing.state && !sharing.error && <>
         <Text style={styles.muted}>Share this iPhone’s location in this circle, including in the background.</Text>
         <Button title="Start location sharing" disabled={busy}

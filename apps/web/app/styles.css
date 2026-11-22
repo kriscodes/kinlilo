@@ -59,3 +59,12 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
   .topbar { align-items: flex-start; }
   .workspace { padding-block: 24px; }
 }
+.circle-map { height: clamp(220px, 42vw, 350px); border: 1px solid var(--line); border-radius: 12px; background: #e3edf4; }
+.location-map-marker, .location-map-marker:hover:enabled { width: 30px; height: 30px; min-height: 0; padding: 0; border: 0; background: transparent; }
+.location-map-marker::after { content: ""; position: absolute; inset: 6px; border: 2px solid white; border-radius: 50%; background: var(--pin-color); box-shadow: 0 1px 5px #25193480; }
+.fit-locations { margin-top: 8px; }
+.location-roster li > div { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.location-summary { text-align: right; justify-items: end; }
+.location-status { color: var(--muted); font-size: .85rem; font-weight: 700; }
+.location-status[data-status="recent"] { color: var(--action); }
+.location-status[data-status="delayed"] { color: #805218; }
