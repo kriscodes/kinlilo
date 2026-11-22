@@ -68,7 +68,7 @@ async function openOutbox(create: boolean) {
   }
 }
 
-function useDatabase<T>(operation: (db: SQLite.SQLiteDatabase) => Promise<T>, create = false): Promise<T | null> {
+function withOutboxDatabase<T>(operation: (db: SQLite.SQLiteDatabase) => Promise<T>, create = false): Promise<T | null> {
   // The keyed connection is shared by the task and the UI. Queue all operations outside transactions.
   const next = tail.then(async () => {
     try {
@@ -92,11 +92,11 @@ function readStatus(db: SQLite.SQLiteDatabase) {
 }
 
 export function getOutboxStatus() {
-  return useDatabase(readStatus);
+  return withOutboxDatabase(readStatus);
 }
 
 export async function getInstallationId() {
-  const installation = await useDatabase(async db => {
+  const installation = await withOutboxDatabase(async db => {
     await db.runAsync("INSERT OR IGNORE INTO installation (id, device_id) VALUES (1, ?)", Crypto.randomUUID());
     return db.getFirstAsync<{ device_id: string }>("SELECT device_id FROM installation WHERE id = 1");
   }, true);
@@ -105,18 +105,18 @@ export async function getInstallationId() {
 }
 
 export function activateOutbox(session: LocalSession) {
-  return useDatabase(db => db.runAsync(`
+  return withOutboxDatabase(db => db.runAsync(`
     INSERT INTO sharing (id, account_id, circle_id, session_id, capture_after, phase)
     VALUES (1, ?, ?, ?, ?, 'active')
   `, session.accountId, session.circleId, session.sessionId, session.captureAfter), true);
 }
 
 export function pauseOutbox(sessionId: string) {
-  return useDatabase(db => db.runAsync("UPDATE sharing SET phase = 'pausing' WHERE session_id = ?", sessionId));
+  return withOutboxDatabase(db => db.runAsync("UPDATE sharing SET phase = 'pausing' WHERE session_id = ?", sessionId));
 }
 
 export function removeOutbox(sessionId: string) {
-  return useDatabase(db => db.runAsync("DELETE FROM sharing WHERE session_id = ?", sessionId));
+  return withOutboxDatabase(db => db.runAsync("DELETE FROM sharing WHERE session_id = ?", sessionId));
 }
 
 async function prune(db: SQLite.SQLiteDatabase, sessionId: string) {
@@ -131,7 +131,7 @@ async function prune(db: SQLite.SQLiteDatabase, sessionId: string) {
 }
 
 export function enqueueLocations(fixes: LocationObject[]) {
-  return useDatabase(db => db.withTransactionAsync(async () => {
+  return withOutboxDatabase(db => db.withTransactionAsync(async () => {
     const state = await readStatus(db);
     if (state?.phase !== "active") return;
     for (const fix of fixes) {
@@ -149,7 +149,7 @@ export function enqueueLocations(fixes: LocationObject[]) {
 }
 
 export async function nextLocationBatch(sessionId: string): Promise<LocationEvent[]> {
-  const rows = await useDatabase(async db => {
+  const rows = await withOutboxDatabase(async db => {
     await db.withTransactionAsync(() => prune(db, sessionId));
     return db.getAllAsync<Omit<LocationEvent, "capturedAt"> & { capturedAt: number }>(`
       SELECT event_id AS eventId, captured_at AS capturedAt, latitude, longitude, accuracy_m AS accuracyM
@@ -161,7 +161,7 @@ export async function nextLocationBatch(sessionId: string): Promise<LocationEven
 
 export function acknowledgeBatch(sessionId: string, eventIds: string[], rejected: number) {
   if (eventIds.length === 0) return;
-  return useDatabase(db => db.withTransactionAsync(async () => {
+  return withOutboxDatabase(db => db.withTransactionAsync(async () => {
     const parameters = eventIds.map(() => "?").join(", ");
     await db.runAsync(`DELETE FROM outbox WHERE session_id = ? AND event_id IN (${parameters})`, sessionId, ...eventIds);
     if (rejected) {
